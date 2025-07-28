@@ -27,7 +27,7 @@ variable "vm_admin_username" {
 variable "public_key_path" {
   description = "The path to your SSH public key file."
   type        = string
-  default     = "/home/Aziz/.ssh/id_rsa_azure_vm.pub"
+  default     = "./id_rsa_azure_vm.pub"
 
 }
 
