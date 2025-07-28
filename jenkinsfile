@@ -1,0 +1,60 @@
+pipeline {
+  agent any
+
+  environment {
+    SSH_CREDENTIALS_ID = 'azure_vm_key'
+    APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
+  }
+
+  stages {
+
+    stage('Checkout Repo') {
+      steps {
+        script {
+          checkout([
+            $class: 'GitSCM',
+            branches: [[name: 'main']],
+            userRemoteConfigs: [[url: env.APP_REPO_URL]],
+            doNotPoll: true
+          ])
+        }
+      }
+    }
+
+    stage('Terraform') {
+      steps {
+        dir('terraform') {
+          sh 'terraform init'
+          sh 'terraform plan'
+          sh 'terraform apply -auto-approve'
+        }
+      }
+    }
+
+    stage('Ansible Deploy') {
+      steps {
+        dir('ansible') {
+          withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'KEYFILE')]) {
+            sh """
+              ansible-playbook deploy_app.yml \
+                -i inventory.ini \
+                --private-key=$KEYFILE \
+                -e app_repo_url=../SSATF
+            """
+          }
+        }
+      }
+    }
+
+    stage('Smoke Test') {
+      steps {
+        dir('terraform') {
+          script {
+            def ip = sh(script: "terraform output -raw public_ip_address", returnStdout: true).trim()
+            sh "curl --fail http://${ip}:4000"
+          }
+        }
+      }
+    }
+  }
+}
