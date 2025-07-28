@@ -1,0 +1,28 @@
+{
+  "name": "transactiongenerationapi",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node TranGenApi.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.1.0",
+    "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "joi": "^17.13.3",
+    "kafka-node": "^5.0.0",
+    "kafkajs": "^2.2.4",
+    "mongodb": "^6.17.0",
+    "multer": "^2.0.1"
+  },
+  "devDependencies": {
+    "jest": "^30.0.4"
+  }
+}

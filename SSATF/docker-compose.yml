@@ -1,0 +1,175 @@
+version: '3.8'
+
+services:
+  # --- Databases ---
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck: # Added healthcheck for MongoDB
+      test: ["CMD-SHELL", "mongosh --eval 'db.runCommand({ping:1})' --quiet || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s # Give MongoDB time to start before checking
+
+  # --- Message Broker and its Dependency ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck: # Added healthcheck for Zookeeper
+      test: ["CMD-SHELL", "echo stat | nc localhost 2181 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy # Ensure Zookeeper is healthy
+    ports:
+      - "9092:9092" # External access
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092 # Internal Docker network listener
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+    healthcheck: # Healthcheck for Kafka
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s # Give Kafka ample time to start
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.3
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck: # Added healthcheck for Elasticsearch
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Elasticsearch can take time to start
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.0.3
+    container_name: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  kibana-import:
+    image: curlimages/curl:latest
+    container_name: kibana-import
+    depends_on:
+      kibana:
+        condition: service_healthy
+    volumes:
+      - ./kibana/dashboards:/dashboards:ro
+      - ./kibana/import-dashboard.sh:/import-dashboard.sh:ro
+    entrypoint: ["sh", "/import-dashboard.sh"]
+
+
+
+  # Logstash for Kafka to Elasticsearch
+  logstash:
+    image: docker.elastic.co/logstash/logstash:9.0.3
+    container_name: logstash
+    depends_on:
+      kafka:
+        condition: service_healthy # Ensure Kafka is healthy
+      elasticsearch:
+        condition: service_healthy # Ensure Elasticsearch is healthy
+    ports:
+      - "9600:9600"
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    environment:
+      LS_JAVA_OPTS: "-Xms512m -Xmx512m"
+    healthcheck: # Added healthcheck for Logstash
+      test: ["CMD-SHELL", "curl -f http://localhost:9600/_node/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # --- Node.js Microservices ---
+  transaction-generator-api:
+    build:
+      context: ./Services/TransactionGenerationAPI
+      dockerfile: Dockerfile
+    container_name: transaction-generator-api
+    ports:
+      - "7000:7000" # Expose the API port
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/Financial_Transactions
+      KAFKA_BROKER: kafka:9092 # Updated to kafka:9092 as advertised
+      PORT: 7000
+    depends_on:
+      kafka:
+        condition: service_healthy # Ensure Kafka is healthy
+      mongodb:
+        condition: service_healthy # Ensure MongoDB is healthy
+
+  data-analyser-service:
+    build:
+      context: ./Services/DataAnalyserService
+      dockerfile: Dockerfile
+    container_name: data-analyser-service
+    ports: 
+      - "7002:7002" # Expose the Data Analyser Service port
+    environment:
+      KAFKA_BROKER: kafka:9092 # Updated to kafka:9092 as advertised
+      # Add other environment variables for this service (e.g., Elasticsearch host if it writes there)
+    depends_on:
+      kafka:
+        condition: service_healthy # Ensure Kafka is healthy
+
+  # --- Client UI web applciation Service ---
+  client-ui:
+    build:
+      context: ./Client_UI
+      dockerfile: Dockerfile
+    container_name: client-ui
+    ports:
+      - "4000:4000"
+    depends_on:
+      transaction-generator-api:
+        condition: service_started # UI just needs the API to be started, not necessarily healthy (yet)
+
+volumes:
+  mongodb_data:
+  es_data:

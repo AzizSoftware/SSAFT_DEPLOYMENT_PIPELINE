@@ -1,0 +1,77 @@
+---
+- name: Deploy Microservice Application
+  hosts: webservers
+  become: yes
+
+  vars:
+    app_repo_url: "{{ lookup('env', 'GITHUB_REPO_URL') or 'https://github.com/AzizSoftware/SSATF.git' }}"
+    app_dir_on_vm: "/home/azureuser/my-microservice-app"
+    docker_compose_file: "{{ app_dir_on_vm }}/docker-compose.yml"
+
+  tasks:
+    - name: Ensure git is installed (redundant with cloud-init, but good for robustness)
+      ansible.builtin.apt:
+        name: git
+        state: present
+        update_cache: yes
+
+    - name: Add azureuser to docker group (if not already done by cloud-init, or if session isn't refreshed)
+      ansible.builtin.user:
+        name: azureuser
+        groups: docker
+        append: yes
+
+    - name: Ensure application directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir_on_vm }}"
+        state: directory
+        owner: azureuser
+        group: azureuser
+        mode: '0755'
+
+    - name: Clone or pull application repository (updates if already exists, clones if not)
+      ansible.builtin.git:
+        repo: "{{ app_repo_url }}"
+        dest: "{{ app_dir_on_vm }}"
+        version: main
+        accept_hostkey: yes
+        force: yes
+      become_user: azureuser
+
+    - name: Fix permissions for app directory (crucial for docker/user access)
+      ansible.builtin.file:
+        path: "{{ app_dir_on_vm }}"
+        state: directory
+        owner: azureuser
+        group: azureuser
+        recurse: yes
+        mode: '0755'
+
+    - name: Ensure Docker daemon is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # ✅ NOUVELLE TÂCHE ajoutée pour corriger l'erreur docker python module
+    - name: Ensure Docker SDK for Python is installed
+      ansible.builtin.apt:
+        name: python3-docker
+        state: present
+        update_cache: yes
+
+        
+    - name: Ensure docker-compose Python module is installed
+      ansible.builtin.pip:
+        name: docker-compose
+        executable: pip3
+
+
+    - name: Build and bring up Docker Compose services
+      community.docker.docker_compose:
+        project_src: "{{ app_dir_on_vm }}"
+        files:
+          - docker-compose.yml
+        build: yes
+        state: present
+      become: yes

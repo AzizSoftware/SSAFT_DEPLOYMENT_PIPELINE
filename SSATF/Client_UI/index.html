@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financial Transaction Anomaly Monitoring</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="assets/LOGO.jpeg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+    body { font-family: 'Montserrat', sans-serif; }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #2a2a2a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #555;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #777;
+    }
+
+    body {
+      background-color: #1a1a1a;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('https://wealthandfinance.digital/wp-content/uploads/2021/07/Finance-technology.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      z-index: -1;
+      opacity: 1;
+      filter: blur(5px) brightness(0.3);
+      transform: scale(1.02);
+    }
+
+    .text-gray-800 { color: #e0e0e0; }
+    .text-gray-600 { color: #b0b0b0; }
+    .text-gray-500 { color: #909090; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+  <header class="bg-gradient-to-r from-[#131231] via-[#131231] to-red-600 text-white py-8 shadow-3xl relative z-10">
+    <div class="max-w-7xl mx-auto flex items-center justify-between px-6">
+      <img src="assets/LOGO.jpeg" alt="VERMEG Logo" class="h-36 w-36 object-contain rounded-full border-4 border-[#9d1b33] shadow-2xl transform hover:scale-105 transition-transform duration-300 flex-shrink-0">
+      <div class="flex flex-col items-end text-right ml-8">
+        <h1 class="text-2xl md:text-3xl lg:text-4xl font-bold tracking-tighter leading-tight drop-shadow-lg">
+          Financial Transaction Anomaly Monitoring
+        </h1>
+        <p class="text-xl font-bold mt-2 text-gray-200">FTAM</p>
+        <p class="text-sm md:text-base mt-4 italic opacity-70 text-gray-200">Prototype for Real-Time Anomaly Detection | VERMEG – July 2025</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-20 relative z-10 flex-grow">
+    <section class="bg-white/5 backdrop-blur-sm p-10 md:p-14 rounded-xl shadow-3xl border border-gray-700 transform hover:scale-[1.005] transition duration-300 ease-in-out">
+      <h2 class="text-4xl font-bold mb-8 text-blue-200 border-b-2 border-blue-200/50 pb-4 relative">
+        Ingest Transaction Data
+        <span class="absolute bottom-[-2px] left-0 w-24 h-1 bg-blue-200 rounded-full"></span>
+      </h2>
+      <p class="mb-10 text-lg font-semibold text-gray-300 leading-relaxed">Choose how to upload or connect your transaction data to the real-time anomaly detection stream:</p>
+
+      <form id="dataForm" class="space-y-10">
+        <div>
+          <label class="flex items-center gap-4 text-xl font-semibold text-gray-200 cursor-pointer">
+            <input type="radio" name="inputMethod" value="file" class="w-6 h-6 text-[#0061AF] focus:ring-[#0061AF] border-gray-500 bg-gray-700 checked:bg-[#0061AF]" checked>
+            Upload File (CSV or JSON)
+          </label>
+
+          <div class="flex items-center gap-6 mt-5 pl-10">
+            <input type="file" id="fileInput" accept=".json,.csv" class="hidden" />
+            <label for="fileInput" class="bg-gradient-to-r from-[#131231] via-[#131231] to-red-600 text-white px-7 py-3.5 rounded-md shadow-lg hover:shadow-xl cursor-pointer transition duration-200 ease-in-out text-lg font-semibold transform hover:-translate-y-1 active:scale-95">
+              Choose File
+            </label>
+            <span id="fileName" class="text-base italic text-gray-400">No file selected</span>
+          </div>
+        </div>
+
+        <div class="pt-10 border-t border-gray-700">
+          <label class="flex items-center gap-4 text-xl font-semibold text-gray-200 cursor-pointer">
+            <input type="radio" name="inputMethod" value="mongo" class="w-6 h-6 text-[#0061AF] focus:ring-[#0061AF] border-gray-500 bg-gray-700 checked:bg-[#0061AF]">
+            Connect to MongoDB
+          </label>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mt-5 pl-10">
+            <input type="text" id="mongoUri" placeholder="MongoDB URI (e.g., mongodb://localhost:27017)" class="border border-gray-600 bg-gray-800 text-gray-200 px-6 py-3.5 rounded-lg focus:ring-2 focus:ring-[#0061AF] focus:border-transparent outline-none transition duration-200 text-base placeholder-gray-500" />
+            <input type="text" id="dbName" placeholder="Database Name" class="border border-gray-600 bg-gray-800 text-gray-200 px-6 py-3.5 rounded-lg focus:ring-2 focus:ring-[#0061AF] focus:border-transparent outline-none transition duration-200 text-base placeholder-gray-500" />
+            <input type="text" id="collectionName" placeholder="Collection Name" class="border border-gray-600 bg-gray-800 text-gray-200 px-6 py-3.5 rounded-lg focus:ring-2 focus:ring-[#0061AF] focus:border-transparent outline-none transition duration-200 text-base placeholder-gray-500" />
+          </div>
+        </div>
+
+        <div class="pt-10">
+          <button type="submit" class="w-full bg-gradient-to-r from-[#131231] via-[#131231] to-red-600 text-white font-bold py-5 rounded-lg shadow-3xl hover:shadow-4xl transition duration-300 ease-in-out text-xl transform hover:scale-[1.015] active:scale-100">
+            Submit Data
+          </button>
+        </div>
+      </form>
+
+      <div id="response" class="hidden mt-10 p-6 rounded-lg border border-blue-600 bg-blue-900/30 text-blue-300 text-base font-medium shadow-lg backdrop-blur-sm"></div>
+    </section>
+     <div class="mt-10">
+      <a href="http://localhost:5601/app/r/s/BEfKU" target="_blank" class="block text-center w-full bg-gradient-to-r from-[#131231] via-[#131231] to-red-600 text-white font-bold py-5 rounded-lg shadow-3xl hover:shadow-4xl transition duration-300 ease-in-out text-xl transform hover:scale-[1.015] active:scale-100">
+        Click this button to see the current dashboard
+      </a>
+    </div>
+  </main>
+
+  <footer class="bg-[#1a1a1a] text-gray-400 text-sm md:text-base text-center py-10 border-t border-gray-700">
+    © 2025 VERMEG – All rights reserved
+  </footer>
+
+  <script>
+    document.getElementById("fileInput").addEventListener("change", function () {
+      const fileName = this.files[0]?.name || "No file selected";
+      document.getElementById("fileName").textContent = fileName;
+    });
+
+    document.querySelectorAll('input[name="inputMethod"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            const isMongoSelected = this.value === 'mongo';
+            const mongoFields = [
+                document.getElementById('mongoUri'),
+                document.getElementById('dbName'),
+                document.getElementById('collectionName')
+            ];
+
+            mongoFields.forEach(field => {
+                field.disabled = !isMongoSelected;
+                if (!isMongoSelected) {
+                    field.classList.add('bg-gray-800'); // Ensure background is consistent when disabled
+                    field.classList.remove('bg-gray-700'); // Remove potential bg from enabled state
+                    field.classList.add('opacity-70', 'cursor-not-allowed');
+                } else {
+                    field.classList.remove('bg-gray-800', 'opacity-70', 'cursor-not-allowed');
+                    field.classList.add('bg-gray-700'); // Add bg for enabled state
+                }
+            });
+            // Update initial state for file radio if checked by default
+            if (document.querySelector('input[name="inputMethod"][value="file"]').checked) {
+              mongoFields.forEach(field => {
+                  field.classList.add('bg-gray-800', 'opacity-70', 'cursor-not-allowed');
+              });
+            }
+        });
+    });
+
+    // Initialize disabled state for MongoDB fields on page load
+    document.addEventListener('DOMContentLoaded', (event) => {
+        const fileRadio = document.querySelector('input[name="inputMethod"][value="file"]');
+        if (fileRadio && fileRadio.checked) {
+            const mongoFields = [
+                document.getElementById('mongoUri'),
+                document.getElementById('dbName'),
+                document.getElementById('collectionName')
+            ];
+            mongoFields.forEach(field => {
+                field.disabled = true;
+                field.classList.add('bg-gray-800', 'opacity-70', 'cursor-not-allowed');
+            });
+        }
+    });
+  </script>
+
+  <script src="script.js"></script>
+</body>
+</html>
