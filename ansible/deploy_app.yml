@@ -4,7 +4,7 @@
   become: yes
 
   vars:
-    app_repo_url: "{{ lookup('env', 'GITHUB_REPO_URL') or 'https://github.com/AzizSoftware/SSATF.git' }}"
+    app_repo_url: "{{ lookup('env', 'GITHUB_REPO_URL') or 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git' }}"
     app_dir_on_vm: "/home/azureuser/my-microservice-app"
     docker_compose_file: "{{ app_dir_on_vm }}/docker-compose.yml"
 
