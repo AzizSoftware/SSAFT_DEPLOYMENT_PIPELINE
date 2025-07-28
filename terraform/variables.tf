@@ -48,3 +48,8 @@ variable "docker_compose_file_path" {
   type        = string
   default     = "docker-compose.yml" # Adjust if your docker-compose file is in a subdirectory
 }
+variable "subscription_id" {}
+variable "client_id" {}
+variable "client_secret" {}
+variable "tenant_id" {}
+
