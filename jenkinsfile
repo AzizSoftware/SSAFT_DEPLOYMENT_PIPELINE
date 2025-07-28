@@ -22,14 +22,32 @@ pipeline {
     }
 
     stage('Terraform') {
-      steps {
-        dir('terraform') {
-          sh 'terraform init'
-          sh 'terraform plan'
-          sh 'terraform apply -auto-approve'
-        }
+  steps {
+    dir('terraform') {
+      withCredentials([
+        string(credentialsId: 'azure-subscription-id', variable: 'ARM_SUBSCRIPTION_ID'),
+        string(credentialsId: 'azure-client-id', variable: 'ARM_CLIENT_ID'),
+        string(credentialsId: 'azure-client-secret', variable: 'ARM_CLIENT_SECRET'),
+        string(credentialsId: 'azure-tenant-id', variable: 'ARM_TENANT_ID')
+      ]) {
+        sh '''
+          terraform init
+          terraform plan \
+            -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var="client_id=$ARM_CLIENT_ID" \
+            -var="client_secret=$ARM_CLIENT_SECRET" \
+            -var="tenant_id=$ARM_TENANT_ID"
+
+          terraform apply -auto-approve \
+            -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var="client_id=$ARM_CLIENT_ID" \
+            -var="client_secret=$ARM_CLIENT_SECRET" \
+            -var="tenant_id=$ARM_TENANT_ID"
+        '''
       }
     }
+  }
+}
 
     stage('Ansible Deploy') {
       steps {
