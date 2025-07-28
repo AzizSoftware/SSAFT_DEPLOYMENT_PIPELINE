@@ -34,7 +34,7 @@ variable "github_repo_url" {
   description = "The URL of your GitHub repository containing the microservice application."
   type        = string
   # IMPORTANT: Replace with your actual repo URL!
-  default     = "https://github.com/AzizSoftware/SSATF.git"
+  default     = "https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git"
 }
 
 variable "project_directory_on_vm" {
