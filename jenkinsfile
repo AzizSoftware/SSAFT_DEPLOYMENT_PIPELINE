@@ -22,6 +22,9 @@ pipeline {
                         userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']], // <--- TRÈS IMPORTANT : Utilisez l'ID de votre Personal Access Token GitHub ici
                         doNotPoll: true
                     ])
+                    echo "Listing contents of the workspace after cloning the repository:"
+                    sh 'pwd' // Affiche le chemin complet du répertoire de travail
+                    sh 'ls -lR'
                 }
             }
         }
