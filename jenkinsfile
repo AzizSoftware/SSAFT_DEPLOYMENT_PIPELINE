@@ -1,120 +1,143 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    SSH_CREDENTIALS_ID = 'azure_vm_key'
-    APP_REPO_URL       = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
-  }
-
-  stages {
-
-    stage('Checkout Repo') {
-      steps {
-        script {
-          checkout([
-            $class: 'GitSCM',
-            branches: [[name: 'main']],
-            userRemoteConfigs: [[url: env.APP_REPO_URL]],
-            doNotPoll: true
-          ])
-        }
-      }
+    environment {
+        SSH_CREDENTIALS_ID = 'azure_vm_key' // Assurez-vous que c'est bien l'ID de votre Credential SSH Jenkins
+        APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
+        // Assurez-vous que les credentials Azure sont configurés avec ces IDs dans Jenkins
+        AZURE_SUB_ID_CRED = 'azure-subscription-id'
+        AZURE_CLIENT_ID_CRED = 'azure-client-id'
+        AZURE_CLIENT_SECRET_CRED = 'azure-client-secret'
+        AZURE_TENANT_ID_CRED = 'azure-tenant-id'
     }
 
-    stage('Terraform') {
-      steps {
-        dir('terraform') {
-          withCredentials([
-            string(credentialsId: 'azure-subscription-id', variable: 'ARM_SUBSCRIPTION_ID'),
-            string(credentialsId: 'azure-client-id', variable: 'ARM_CLIENT_ID'),
-            string(credentialsId: 'azure-client-secret', variable: 'ARM_CLIENT_SECRET'),
-            string(credentialsId: 'azure-tenant-id', variable: 'ARM_TENANT_ID')
-          ]) {
-            sh '''
-              terraform init
-              terraform plan \
-                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-                -var="client_id=$ARM_CLIENT_ID" \
-                -var="client_secret=$ARM_CLIENT_SECRET" \
-                -var="tenant_id=$ARM_TENANT_ID"
+    stages {
 
-              terraform apply -auto-approve \
-                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-                -var="client_id=$ARM_CLIENT_ID" \
-                -var="client_secret=$ARM_CLIENT_SECRET" \
-                -var="tenant_id=$ARM_TENANT_ID"
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Wait for VM & SSH Readiness') {
-      steps {
-        script {
-          def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
-          echo "VM IP for SSH: ${vmIp}"
-
-          sh "ssh-keygen -R ${vmIp}"
-
-          echo "Waiting for SSH on ${vmIp}:22 to be available..."
-          sh """
-            count=0
-            while ! nc -z -v -w 10 ${vmIp} 22; do
-              echo "Still waiting for SSH to be available on ${vmIp}..."
-              sleep 5
-              count=$((count+1))
-              if [ \$count -ge 18 ]; then
-                echo "SSH connection timed out after 90 seconds. Aborting."
-                exit 1
-              fi
-            done
-            echo "SSH is now open on ${vmIp}!"
-          """
-        }
-      }
-    }
-
-    stage('Ansible Deploy') {
-      steps {
-        dir('ansible') {
-          withCredentials([
-            sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')
-          ]) {
-            script {
-              def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
-              def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
-
-              sh """
-                echo "[webservers]" > inventory.ini
-                echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
-                echo "" >> inventory.ini
-                echo "[all:vars]" >> inventory.ini
-                echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
-                echo "Generated Ansible inventory with IP: ${vmIp}"
-              """
-
-              sh """
-                ansible-playbook deploy_app.yml \\
-                  -i inventory.ini \\
-                  --private-key=${ANSIBLE_PRIVATE_KEY_FILE_PATH} \\
-                  -e app_repo_url=${env.APP_REPO_URL}
-              """
+        stage('Checkout Repo') {
+            steps {
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: 'main']],
+                        userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']], // <--- TRÈS IMPORTANT : Utilisez l'ID de votre Personal Access Token GitHub ici
+                        doNotPoll: true
+                    ])
+                }
             }
-          }
         }
-      }
-    }
 
-    stage('Smoke Test') {
-      steps {
-        dir('terraform') {
-          script {
-            def ip = sh(script: "terraform output -raw public_ip_address", returnStdout: true).trim()
-            sh "curl --fail http://${ip}:4000"
-          }
+        stage('Terraform Init and Apply') {
+            steps {
+                dir('terraform') {
+                    withCredentials([
+                        string(credentialsId: env.AZURE_SUB_ID_CRED, variable: 'ARM_SUBSCRIPTION_ID'),
+                        string(credentialsId: env.AZURE_CLIENT_ID_CRED, variable: 'ARM_CLIENT_ID'),
+                        string(credentialsId: env.AZURE_CLIENT_SECRET_CRED, variable: 'ARM_CLIENT_SECRET'),
+                        string(credentialsId: env.AZURE_TENANT_ID_CRED, variable: 'ARM_TENANT_ID')
+                    ]) {
+                        sh '''
+                            # Optionnel : Détruire l'ancienne infra avant de recréer (décommenter si vous voulez un clean slate à chaque fois)
+                            # terraform destroy -auto-approve \
+                            #   -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+                            #   -var="client_id=$ARM_CLIENT_ID" \
+                            #   -var="client_secret=$ARM_CLIENT_SECRET" \
+                            #   -var="tenant_id=$ARM_TENANT_ID" || true # '|| true' pour ne pas échouer si rien à détruire
+
+                            terraform init -reconfigure # Reconfigure au cas où le backend change
+                            terraform plan \
+                                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+                                -var="client_id=$ARM_CLIENT_ID" \
+                                -var="client_secret=$ARM_CLIENT_SECRET" \
+                                -var="tenant_id=$ARM_TENANT_ID"
+
+                            terraform apply -auto-approve \
+                                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+                                -var="client_id=$ARM_CLIENT_ID" \
+                                -var="client_secret=$ARM_CLIENT_SECRET" \
+                                -var="tenant_id=$ARM_TENANT_ID"
+                        '''
+                    }
+                }
+            }
         }
-      }
+
+        // --- STAGE CRUCIALE POUR RÉSOUDRE L'ERREUR "Host key verification failed" ---
+        stage('Wait for VM & SSH Readiness') {
+            steps {
+                script {
+                    // Récupérer l'IP de la VM depuis les outputs Terraform
+                    // Assurez-vous que terraform output "public_ip_address" existe dans votre outputs.tf
+                    def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+                    echo "VM IP for SSH: ${vmIp}"
+
+                    // Supprime l'ancienne clé d'hôte SSH pour cette IP de known_hosts sur le serveur Jenkins.
+                    // C'est essentiel car une nouvelle VM aura une nouvelle clé d'hôte SSH.
+                    sh "ssh-keygen -R ${vmIp}"
+
+                    // Attendre que le port SSH (22) soit ouvert sur la nouvelle VM
+                    echo "Waiting for SSH on ${vmIp}:22 to be available..."
+                    sh '''
+                        # Utilise 'netcat' (nc) pour vérifier l'ouverture du port
+                        count=0
+                        while ! nc -z -v -w 10 ''' + vmIp + ''' 22; do
+                            echo "Still waiting for SSH to be available on ''' + vmIp + '''..."
+                            sleep 5
+                            count=$((count+1))
+                            if [ $count -ge 18 ]; then # Attendre jusqu'à 90 secondes (18 * 5s)
+                                echo "SSH connection timed out after 90 seconds. Aborting."
+                                exit 1 # Échouer le pipeline si le port SSH n'est pas ouvert à temps
+                            fi
+                        done
+                        echo "SSH is now open on ''' + vmIp + '''!"
+                    '''
+                }
+            }
+        }
+
+        stage('Ansible Deploy') {
+            steps {
+                dir('ansible') {
+                    // Invoque la clé privée SSH depuis les identifiants Jenkins
+                    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')]) {
+                        script {
+                            // Récupérer l'IP de la VM et l'admin_username depuis les outputs Terraform
+                            // Assurez-vous que ces outputs existent dans votre outputs.tf
+                            def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+                            def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
+
+                            // Générer le fichier inventory.ini DYNAMIQUEMENT pour Ansible
+                            // L'option `--private-key` d'Ansible est utilisée, donc pas besoin de la clé dans l'inventaire
+                            sh """
+                                echo "[webservers]" > inventory.ini
+                                echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
+                                echo "" >> inventory.ini
+                                echo "[all:vars]" >> inventory.ini
+                                echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
+                                echo "Generated Ansible inventory for VM at: ${vmIp}"
+                            """
+                            // Exécuter le playbook Ansible
+                            sh """
+                                ansible-playbook deploy_app.yml \\
+                                  -i inventory.ini \\
+                                  --private-key=${ANSIBLE_PRIVATE_KEY_FILE_PATH} \\
+                                  -e app_repo_url=${env.APP_REPO_URL}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                dir('terraform') {
+                    script {
+                        def ip = sh(script: "terraform output -raw public_ip_address", returnStdout: true).trim()
+                        echo "Checking application health on http://${ip}:4000..."
+                        sh "curl --fail http://${ip}:4000" // Utilisez --fail pour que curl retourne une erreur si la requête HTTP échoue
+                    }
+                }
+            }
+        }
     }
-  }
 }
