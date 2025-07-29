@@ -119,13 +119,16 @@ pipeline {
                                 echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
                                 echo "Generated Ansible inventory for VM at: ${vmIp}"
                             """
-                            // Exécuter le playbook Ansible
-                            sh """
-                                ansible-playbook deploy_app.yml \\
-                                  -i inventory.ini \\
-                                  --private-key=${ANSIBLE_PRIVATE_KEY_FILE_PATH} \\
-                                  -e app_repo_url=${env.APP_REPO_URL}
-                            """
+                            // Exécuter le playbook Ansible de manière plus sécurisée
+                            // Utilisation de 'withEnv' pour passer le secret comme variable d'environnement shell masquée
+                            withEnv(["ANSIBLE_KEY_VAR=${ANSIBLE_PRIVATE_KEY_FILE_PATH}"]) { // <--- NOUVELLE LIGNE : Utilise withEnv
+                                sh """
+                                    ansible-playbook deploy_app.yml \\
+                                      -i inventory.ini \\
+                                      --private-key=\${ANSIBLE_KEY_VAR} \\ # <--- CHANGEMENT ICI : Utilise \${ANSIBLE_KEY_VAR}
+                                      -e app_repo_url=${env.APP_REPO_URL}
+                                """
+                            }
                         }
                     }
                 }
