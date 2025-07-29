@@ -14,3 +14,7 @@ output "application_url" {
   description = "Potential URL for your application (assuming it runs on port 80)."
   value       = "http://${azurerm_public_ip.main_public_ip.ip_address}"
 }
+output "vm_admin_username" {
+  value       = var.vm_admin_username # Expose la valeur de la variable vm_admin_username
+  description = "The admin username for the Azure VM."
+}
