@@ -63,6 +63,33 @@ pipeline {
                 }
             }
         }
+        stage('Wait for cloud-init to Finish') {
+          steps {
+            script {
+              def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+              def username = sh(script: "cd terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
+        
+              // Wait for SSH to be ready (if not already done)
+              sh "ssh-keygen -R ${vmIp}"
+        
+              echo "Waiting for cloud-init to finish on VM at ${vmIp}..."
+        
+              // Retry SSH and cloud-init status until success
+              sh """
+                for i in {1..30}; do
+                  echo "Attempt \$i: Checking cloud-init status..."
+                  ssh -o StrictHostKeyChecking=no ${username}@${vmIp} \\
+                    'cloud-init status --wait && echo Cloud-init complete && exit 0' && break || sleep 10
+                  if [ \$i -eq 30 ]; then
+                    echo "Cloud-init did not finish after 5 minutes. Failing."
+                    exit 1
+                  fi
+                done
+              """
+            }
+          }
+        }
+
 
         stage('Wait for VM & SSH Readiness') {
             steps {
