@@ -64,25 +64,20 @@ pipeline {
             }
         }
 
-        // --- STAGE CRUCIALE POUR RÉSOUDRE L'ERREUR "Host key verification failed" ---
         stage('Wait for VM & SSH Readiness') {
             steps {
                 script {
                     def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
                     echo "VM IP for SSH: ${vmIp}"
 
-                    // --- NOUVELLES LIGNES À AJOUTER ---
                     // Assurez-vous que le répertoire .ssh et le fichier known_hosts existent avec les bonnes permissions
                     sh """
-                        mkdir -p ~/.ssh       # Crée le répertoire .ssh s'il n'existe pas (-p)
-                        chmod 700 ~/.ssh      # Donne les permissions rwx seulement à l'utilisateur
-                        touch ~/.ssh/known_hosts # Crée le fichier known_hosts s'il n'existe pas
-                        chmod 600 ~/.ssh/known_hosts # Donne les permissions rw seulement à l'utilisateur pour le fichier
+                        mkdir -p ~/.ssh
+                        chmod 700 ~/.ssh
+                        touch ~/.ssh/known_hosts
+                        chmod 600 ~/.ssh/known_hosts
                     """
-                    // --- FIN DES NOUVELLES LIGNES ---
-
-                    // Maintenant, supprimer l'ancienne clé d'hôte fonctionnera
-                    sh "ssh-keygen -R ${vmIp}"
+                    // REMARQUE IMPORTANTE : ssh-keygen -R a été déplacé dans la stage Ansible Deploy.
 
                     echo "Waiting for SSH on ${vmIp}:22 to be available..."
                     sh '''
@@ -101,19 +96,54 @@ pipeline {
                 }
             }
         }
+
         stage('Ansible Deploy') {
             steps {
                 dir('ansible') {
-                    // Invoque la clé privée SSH depuis les identifiants Jenkins
                     withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')]) {
                         script {
-                            // Récupérer l'IP de la VM et l'admin_username depuis les outputs Terraform
-                            // Assurez-vous que ces outputs existent dans votre outputs.tf
                             def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
                             def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
 
+                            // *** BLOC DE GESTION DE LA CLÉ HÔTE SSH AVEC DÉBOGAGE ET OPTIONS AGRESSIVES ***
+                            echo "Performing initial SSH connection to add/verify host key for ${vmIp}..."
+                            sh """
+                                set -x # Active le traçage des commandes shell pour le débogage
+
+                                echo "Contents of ~/.ssh/known_hosts BEFORE any SSH attempt:"
+                                cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty."
+
+                                # Supprime l'ancienne clé d'hôte (au cas où elle existerait et serait incorrecte)
+                                # Ceci est fait ici pour être sûr, même si les options SSH plus bas devraient ignorer known_hosts.
+                                ssh-keygen -R ${vmIp} || true
+
+                                echo "Contents of ~/.ssh/known_hosts AFTER ssh-keygen -R:"
+                                cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty after removal."
+
+                                # Tente une connexion SSH avec StrictHostKeyChecking=no et UserKnownHostsFile=/dev/null
+                                # pour complètement ignorer known_hosts et ne pas y écrire.
+                                # Utilisez -vvv pour un débogage SSH très verbeux.
+                                # Redirige stderr vers stdout (2>&1) et sauvegarde dans un fichier temporaire pour un affichage propre.
+                                ssh -vvv -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                                    -i ${ANSIBLE_PRIVATE_KEY_FILE_PATH} \
+                                    ${vmAdminUsername}@${vmIp} exit 2>&1 | tee ssh_debug.log
+                                
+                                SSH_EXIT_CODE=\$? # Capture le code de sortie de la commande ssh
+                                cat ssh_debug.log # Affiche le journal de débogage SSH
+
+                                if [ \$SSH_EXIT_CODE -ne 0 ]; then
+                                    echo "Initial SSH connection FAILED with exit code \$SSH_EXIT_CODE."
+                                    echo "Review ssh_debug.log above for details to understand why."
+                                    exit 1 # Fait échouer le pipeline si la connexion SSH initiale échoue
+                                fi
+                                
+                                echo "Initial SSH connection successful (host key verification bypassed)."
+                                echo "Contents of ~/.ssh/known_hosts AFTER initial SSH connection (should be empty/unchanged):"
+                                cat ~/.ssh/known_hosts # Affiche le contenu (pour le débogage)
+                            """
+                            // *** FIN DU BLOC DE DÉBOGAGE ***
+
                             // Générer le fichier inventory.ini DYNAMIQUEMENT pour Ansible
-                            // L'option `--private-key` d'Ansible est utilisée, donc pas besoin de la clé dans l'inventaire
                             sh """
                                 echo "[webservers]" > inventory.ini
                                 echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
@@ -123,13 +153,13 @@ pipeline {
                                 echo "Generated Ansible inventory for VM at: ${vmIp}"
                             """
                             // Exécuter le playbook Ansible de manière plus sécurisée
-                            // Utilisation de 'withEnv' pour passer le secret comme variable d'environnement shell masquée
                             withEnv(["ANSIBLE_KEY_VAR=${ANSIBLE_PRIVATE_KEY_FILE_PATH}"]) {
                                 sh """
                                     ansible-playbook deploy_app.yml \\
                                       -i inventory.ini \\
                                       --private-key=\${ANSIBLE_KEY_VAR} \\
-                                      -e app_repo_url=${env.APP_REPO_URL}
+                                      -e app_repo_url=${env.APP_REPO_URL} \\
+                                      -e ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' # <--- TRÈS IMPORTANT : Ajoute les options SSH à Ansible
                                 """
                             }
                         }
