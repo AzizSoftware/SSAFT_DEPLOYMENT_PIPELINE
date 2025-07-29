@@ -105,43 +105,40 @@ pipeline {
                             def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
                             def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
 
-                            // *** BLOC DE GESTION DE LA CLÉ HÔTE SSH AVEC DÉBOGAGE ET OPTIONS AGRESSIVES ***
-                            echo "Performing initial SSH connection to add/verify host key for ${vmIp}..."
+                            // --- BLOC DE DÉBOGAGE SSH POUR LA CLÉ PRIVÉE (qui a maintenant réussi !) ---
+                            echo "Performing initial SSH connection to verify private key and reachability for ${vmIp}..."
                             sh """
                                 set -x # Active le traçage des commandes shell pour le débogage
 
-                                echo "Contents of ~/.ssh/known_hosts BEFORE any SSH attempt:"
+                                echo "Contents of ~/.ssh/known_hosts BEFORE SSH attempt:"
                                 cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty."
 
-                                # Supprime l'ancienne clé d'hôte (au cas où elle existerait et serait incorrecte)
-                                # Ceci est fait ici pour être sûr, même si les options SSH plus bas devraient ignorer known_hosts.
+                                # Supprime l'ancienne clé d'hôte (pour la propreté, même si le problème est ailleurs)
                                 ssh-keygen -R ${vmIp} || true
 
                                 echo "Contents of ~/.ssh/known_hosts AFTER ssh-keygen -R:"
                                 cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty after removal."
 
-                                # Tente une connexion SSH avec StrictHostKeyChecking=no et UserKnownHostsFile=/dev/null
-                                # pour complètement ignorer known_hosts et ne pas y écrire.
-                                # Utilisez -vvv pour un débogage SSH très verbeux.
-                                # Redirige stderr vers stdout (2>&1) et sauvegarde dans un fichier temporaire pour un affichage propre.
-                                ssh -vvv -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                                    -i ${ANSIBLE_PRIVATE_KEY_FILE_PATH} \
+                                # Tente une connexion SSH simple pour tester l'authentification et voir l'erreur 'libcrypto'
+                                # Nous laissons la vérification de clé hôte revenir à son comportement par défaut ici pour isoler l'erreur de clé privée.
+                                ssh -vvv -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${ANSIBLE_PRIVATE_KEY_FILE_PATH} \
                                     ${vmAdminUsername}@${vmIp} exit 2>&1 | tee ssh_debug.log
                                 
-                                SSH_EXIT_CODE=\$? # Capture le code de sortie de la commande ssh
+                                SSH_EXIT_CODE=\$?
                                 cat ssh_debug.log # Affiche le journal de débogage SSH
 
                                 if [ \$SSH_EXIT_CODE -ne 0 ]; then
                                     echo "Initial SSH connection FAILED with exit code \$SSH_EXIT_CODE."
-                                    echo "Review ssh_debug.log above for details to understand why."
+                                    echo "This indicates an issue with the SSH key, its passphrase, or its format (likely 'error in libcrypto')."
+                                    echo "Please review ssh_debug.log above for details and re-verify your SSH private key credential."
                                     exit 1 # Fait échouer le pipeline si la connexion SSH initiale échoue
                                 fi
                                 
-                                echo "Initial SSH connection successful (host key verification bypassed)."
-                                echo "Contents of ~/.ssh/known_hosts AFTER initial SSH connection (should be empty/unchanged):"
-                                cat ~/.ssh/known_hosts # Affiche le contenu (pour le débogage)
+                                echo "Initial SSH connection successful (private key seems to be accepted by SSH client for parsing)."
+                                echo "Contents of ~/.ssh/known_hosts AFTER initial SSH connection:"
+                                cat ~/.ssh/known_hosts
                             """
-                            // *** FIN DU BLOC DE DÉBOGAGE ***
+                            // --- FIN DU BLOC DE DÉBOGAGE ---
 
                             // Générer le fichier inventory.ini DYNAMIQUEMENT pour Ansible
                             sh """
@@ -152,14 +149,15 @@ pipeline {
                                 echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
                                 echo "Generated Ansible inventory for VM at: ${vmIp}"
                             """
-                            // Exécuter le playbook Ansible de manière plus sécurisée
+                            // Exécuter le playbook Ansible
                             withEnv(["ANSIBLE_KEY_VAR=${ANSIBLE_PRIVATE_KEY_FILE_PATH}"]) {
                                 sh """
                                     ansible-playbook deploy_app.yml \\
                                       -i inventory.ini \\
                                       --private-key=\${ANSIBLE_KEY_VAR} \\
                                       -e app_repo_url=${env.APP_REPO_URL} \\
-                                      -e ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' # <--- TRÈS IMPORTANT : Ajoute les options SSH à Ansible
+                                      -e ansible_host_key_checking=False \\
+                                      -e "ansible_ssh_extra_args='-o UserKnownHostsFile=/dev/null'" # <--- TRÈS IMPORTANT : APPLIQUER CETTE CORRECTION
                                 """
                             }
                         }
