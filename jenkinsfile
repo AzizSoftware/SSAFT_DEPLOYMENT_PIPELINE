@@ -3,7 +3,7 @@ pipeline {
 
   environment {
     SSH_CREDENTIALS_ID = 'azure_vm_key'
-    APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
+    APP_REPO_URL       = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
   }
 
   stages {
@@ -22,43 +22,85 @@ pipeline {
     }
 
     stage('Terraform') {
-  steps {
-    dir('terraform') {
-      withCredentials([
-        string(credentialsId: 'azure-subscription-id', variable: 'ARM_SUBSCRIPTION_ID'),
-        string(credentialsId: 'azure-client-id', variable: 'ARM_CLIENT_ID'),
-        string(credentialsId: 'azure-client-secret', variable: 'ARM_CLIENT_SECRET'),
-        string(credentialsId: 'azure-tenant-id', variable: 'ARM_TENANT_ID')
-      ]) {
-        sh '''
-          terraform init
-          terraform plan \
-            -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var="client_id=$ARM_CLIENT_ID" \
-            -var="client_secret=$ARM_CLIENT_SECRET" \
-            -var="tenant_id=$ARM_TENANT_ID"
+      steps {
+        dir('terraform') {
+          withCredentials([
+            string(credentialsId: 'azure-subscription-id', variable: 'ARM_SUBSCRIPTION_ID'),
+            string(credentialsId: 'azure-client-id', variable: 'ARM_CLIENT_ID'),
+            string(credentialsId: 'azure-client-secret', variable: 'ARM_CLIENT_SECRET'),
+            string(credentialsId: 'azure-tenant-id', variable: 'ARM_TENANT_ID')
+          ]) {
+            sh '''
+              terraform init
+              terraform plan \
+                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+                -var="client_id=$ARM_CLIENT_ID" \
+                -var="client_secret=$ARM_CLIENT_SECRET" \
+                -var="tenant_id=$ARM_TENANT_ID"
 
-          terraform apply -auto-approve \
-            -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var="client_id=$ARM_CLIENT_ID" \
-            -var="client_secret=$ARM_CLIENT_SECRET" \
-            -var="tenant_id=$ARM_TENANT_ID"
-        '''
+              terraform apply -auto-approve \
+                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+                -var="client_id=$ARM_CLIENT_ID" \
+                -var="client_secret=$ARM_CLIENT_SECRET" \
+                -var="tenant_id=$ARM_TENANT_ID"
+            '''
+          }
+        }
       }
     }
-  }
-}
+
+    stage('Wait for VM & SSH Readiness') {
+      steps {
+        script {
+          def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+          echo "VM IP for SSH: ${vmIp}"
+
+          sh "ssh-keygen -R ${vmIp}"
+
+          echo "Waiting for SSH on ${vmIp}:22 to be available..."
+          sh """
+            count=0
+            while ! nc -z -v -w 10 ${vmIp} 22; do
+              echo "Still waiting for SSH to be available on ${vmIp}..."
+              sleep 5
+              count=$((count+1))
+              if [ \$count -ge 18 ]; then
+                echo "SSH connection timed out after 90 seconds. Aborting."
+                exit 1
+              fi
+            done
+            echo "SSH is now open on ${vmIp}!"
+          """
+        }
+      }
+    }
 
     stage('Ansible Deploy') {
       steps {
         dir('ansible') {
-          withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'KEYFILE')]) {
-            sh """
-              ansible-playbook deploy_app.yml \
-                -i inventory.ini \
-                --private-key=$KEYFILE \
-                -e app_repo_url=../SSATF
-            """
+          withCredentials([
+            sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')
+          ]) {
+            script {
+              def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+              def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
+
+              sh """
+                echo "[webservers]" > inventory.ini
+                echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
+                echo "" >> inventory.ini
+                echo "[all:vars]" >> inventory.ini
+                echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
+                echo "Generated Ansible inventory with IP: ${vmIp}"
+              """
+
+              sh """
+                ansible-playbook deploy_app.yml \\
+                  -i inventory.ini \\
+                  --private-key=${ANSIBLE_PRIVATE_KEY_FILE_PATH} \\
+                  -e app_repo_url=${env.APP_REPO_URL}
+              """
+            }
           }
         }
       }
