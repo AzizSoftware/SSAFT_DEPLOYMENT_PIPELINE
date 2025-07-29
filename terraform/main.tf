@@ -167,24 +167,3 @@ resource "azurerm_linux_virtual_machine" "main_vm" {
     project     = "SSATF_DEP_AZURE"
   }
 }
-
-# Resource pour générer et mettre à jour le fichier d'inventaire Ansible
-resource "null_resource" "ansible_inventory_generator" {
-  # Ce provisioner s'exécutera après que la VM et son IP soient créées.
-  # La dépendance implicite via l'interpolation de la variable est suffisante ici.
-  depends_on = [azurerm_linux_virtual_machine.main_vm]
-
-  # Le provisioner "local-exec" exécute une commande sur la machine locale où Terraform est exécuté.
-  provisioner "local-exec" {
-    # La commande va écrire le contenu du fichier inventory.ini
-    # Notez l'utilisation de `../ansible/inventory.ini` pour pointer vers le bon dossier.
-    command = <<EOT
-      echo "[webservers]" > ../ansible/inventory.ini
-      echo "azure_vm ansible_host=${azurerm_public_ip.main_public_ip.ip_address} ansible_user=${var.vm_admin_username} ansible_ssh_private_key_file=${var.public_key_path}" >> ../ansible/inventory.ini
-      echo "" >> ../ansible/inventory.ini # Ligne vide pour la clarté
-      echo "[all:vars]" >> ../ansible/inventory.ini
-      echo "ansible_python_interpreter=/usr/bin/python3" >> ../ansible/inventory.ini
-      echo "Generated Ansible inventory with IP: ${azurerm_public_ip.main_public_ip.ip_address}"
-    EOT
-  }
-}
