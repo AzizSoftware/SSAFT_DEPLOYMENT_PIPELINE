@@ -9,9 +9,12 @@
     docker_compose_file: "{{ app_dir_on_vm }}/SSATF/docker-compose.yml"
 
   tasks:
-    - name: Wait for cloud-init and SSH to be ready (max 300 sec)
+   
+    - name: Wait for SSH connection and cloud-init to finish (up to 300 seconds)
       ansible.builtin.wait_for_connection:
-        timeout: 300
+        delay: 10 # Délai initial avant la première vérification
+        timeout: 300 # Temps total maximum d'attente
+        sleep: 10 # Intervalle entre les vérifications
 
     - name: Ensure Git is installed (in case cloud-init missed it)
       ansible.builtin.apt:
