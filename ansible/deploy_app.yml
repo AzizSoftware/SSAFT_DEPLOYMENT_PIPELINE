@@ -47,7 +47,6 @@
         gpg --dearmor < /tmp/docker_gpg.key > /usr/share/keyrings/docker-archive-keyring.gpg
         chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
       args:
-        warn: false
         creates: /usr/share/keyrings/docker-archive-keyring.gpg
       become: yes
 
