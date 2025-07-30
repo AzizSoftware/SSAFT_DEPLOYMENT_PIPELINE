@@ -20,22 +20,7 @@
         timeout: 300 # Temps total maximum d'attente
         sleep: 10 # Intervalle entre les vérifications
         
-    - name: Wait for cloud-init apt processes to finish
-      ansible.builtin.shell: |
-        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
-              fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
-              pgrep apt || pgrep apt-get; do
-          echo "Waiting for apt/dpkg locks or processes to clear..."
-          sleep 5
-        done
-        echo "Apt/dpkg locks and processes cleared."
-      args:
-        warn: false # Suppress warning for using shell
-      register: apt_wait_status
-      until: apt_wait_status.rc == 0 # Ensure the loop runs until success
-      retries: 60 # Try for up to 30 * 5 = 150 seconds (adjust as needed)
-      delay: 5 # Check every 5 seconds
-
+    
     # S'assure que git est installé (utile même si cloud-init le fait, pour la robustesse)
     - name: Ensure git is installed (redundant with cloud-init, but good for robustness)
       ansible.builtin.apt:
