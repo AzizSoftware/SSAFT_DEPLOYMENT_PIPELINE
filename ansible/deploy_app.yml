@@ -1,31 +1,95 @@
 ---
 - name: Deploy Microservice Application
   hosts: webservers
-  become: yes
+  become: yes # Exécute les tâches avec les privilèges root (sudo)
 
   vars:
-    app_repo_url: "{{ lookup('env', 'GITHUB_REPO_URL') or 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git' }}"
+    # app_repo_url est passé via -e dans Jenkinsfile, mais c'est une bonne fallback
+    app_repo_url: "{{ lookup('env', 'APP_REPO_URL') or 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git' }}"
     app_dir_on_vm: "/home/azureuser/my-microservice-app"
     docker_compose_file: "{{ app_dir_on_vm }}/docker-compose.yml"
+    # Ajoutez ces variables si vous avez besoin de vous connecter à un registre Docker privé
+    # docker_username: "{{ lookup('env', 'DOCKER_USERNAME') }}"
+    # docker_password: "{{ lookup('env', 'DOCKER_PASSWORD') }}"
 
   tasks:
-    # In your deploy_app.yml or a separate pre-flight playbook
+    # Tâche initiale pour attendre que la VM soit prête via SSH et que cloud-init ait eu le temps de s'exécuter
     - name: Wait for SSH connection and cloud-init to finish (up to 300 seconds)
       ansible.builtin.wait_for_connection:
-        delay: 10 # Initial delay before first check (seconds)
-        timeout: 300 # Total time to wait (seconds) - adjust as needed
-        sleep: 10 # Interval between checks (seconds)
+        delay: 10 # Délai initial avant la première vérification
+        timeout: 300 # Temps total maximum d'attente
+        sleep: 10 # Intervalle entre les vérifications
+
+    # S'assure que git est installé (utile même si cloud-init le fait, pour la robustesse)
     - name: Ensure git is installed (redundant with cloud-init, but good for robustness)
       ansible.builtin.apt:
         name: git
         state: present
         update_cache: yes
 
-    - name: Add azureuser to docker group (if not already done by cloud-init, or if session isn't refreshed)
-      ansible.builtin.user:
-        name: azureuser
-        groups: docker
-        append: yes
+    # --- DÉBUT DES TÂCHES COMPLÈTES D'INSTALLATION DE DOCKER (CRUCIALES POUR LA ROBUSTESSE) ---
+    # Ces tâches assurent que Docker est bien installé par Ansible, indépendamment de cloud-init.
+    - name: Update apt cache (ensure it's fresh for Docker installation)
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install dependencies for Docker
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - gnupg-agent # Nécessaire pour 'gpg --dearmor'
+        - software-properties-common
+
+    - name: Add Docker GPG apt key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker APT repository
+      ansible.builtin.apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+        update_cache: yes # Mettre à jour le cache après l'ajout du dépôt
+
+    - name: Install Docker Engine and Docker Compose Plugin
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes # Mettre à jour le cache avant d'installer les paquets Docker
+      loop:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin # Le plugin docker-compose recommandé pour les versions récentes de Docker
+
+    - name: Ensure Docker service is running and enabled
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+    # --- FIN DES TÂCHES D'INSTALLATION DE DOCKER ---
+
+    # --- DÉBUT DES TÂCHES ROBUSTES D'AJOUT D'UTILISATEUR AU GROUPE DOCKER ---
+    # Cette approche est plus robuste car elle exécute directement 'usermod'
+    # et force une réinitialisation de la connexion SSH pour que le nouveau groupe soit reconnu par Ansible.
+    - name: Check if azureuser is already in docker group
+      ansible.builtin.shell: groups azureuser | grep -q docker
+      register: docker_group_check
+      changed_when: false # Cette tâche ne fait que vérifier, elle ne change rien
+      failed_when: false  # Ne pas faire échouer si 'grep' ne trouve pas le groupe (l'utilisateur n'est pas dedans)
+
+    - name: Add azureuser to docker group if not already present
+      ansible.builtin.shell: usermod -aG docker azureuser
+      args:
+        warn: false # Supprimer l'avertissement concernant l'utilisation du module shell
+      when: docker_group_check.rc != 0 # Exécuter seulement si l'utilisateur n'est pas déjà dans le groupe
+      notify: Reload ssh connection # Déclencher le handler pour réinitialiser la connexion SSH
+    # --- FIN DES TÂCHES ROBUSTES D'AJOUT D'UTILISATEUR AU GROUPE DOCKER ---
 
     - name: Ensure application directory exists
       ansible.builtin.file:
@@ -42,7 +106,7 @@
         version: main
         accept_hostkey: yes
         force: yes
-      become_user: azureuser
+      become_user: azureuser # S'assure que le clone est fait par l'utilisateur azureuser
 
     - name: Fix permissions for app directory (crucial for docker/user access)
       ansible.builtin.file:
@@ -53,31 +117,32 @@
         recurse: yes
         mode: '0755'
 
-    - name: Ensure Docker daemon is running
-      ansible.builtin.service:
-        name: docker
-        state: started
-        enabled: yes
-
-    # ✅ NOUVELLE TÂCHE ajoutée pour corriger l'erreur docker python module
+    # Ces modules sont nécessaires pour que Ansible puisse interagir avec Docker
     - name: Ensure Docker SDK for Python is installed
       ansible.builtin.apt:
         name: python3-docker
         state: present
         update_cache: yes
 
-        
-    - name: Ensure docker-compose Python module is installed
+    - name: Ensure docker-compose Python module is installed (for older docker-compose or if plugin not used)
       ansible.builtin.pip:
         name: docker-compose
         executable: pip3
 
-
     - name: Build and bring up Docker Compose services
       community.docker.docker_compose:
-        project_src: "{{ app_dir_on_vm }}"
+        project_src: "{{ app_dir_on_vm }}" # Chemin vers le répertoire de votre projet sur la VM
         files:
-          - docker-compose.yml
-        build: yes
-        state: present
-      become: yes
+          - docker-compose.yml # Nom de votre fichier docker-compose.yml
+        build: yes # Construit les images Docker définies dans docker-compose.yml
+        state: present # S'assure que les services sont démarrés
+      # Ajoutez 'pull: yes' si vous voulez toujours tirer les images de base
+      # pull: yes
+      # Ajoutez 'recreate: always' si vous voulez toujours recréer les conteneurs
+      # recreate: always
+
+  handlers:
+    # Handler pour réinitialiser la connexion SSH après un changement de groupe
+    - name: Reload ssh connection
+      meta: reset_connection
+      listen: "Reload ssh connection" # Écoute la notification de la tâche 'Add azureuser to docker group if not already present'
