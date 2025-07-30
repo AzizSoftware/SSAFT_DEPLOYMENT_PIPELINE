@@ -19,8 +19,10 @@
         delay: 10 # Délai initial avant la première vérification
         timeout: 300 # Temps total maximum d'attente
         sleep: 10 # Intervalle entre les vérifications
-        
-    
+
+    # NOTE: The "Wait for cloud-init apt processes to finish" task
+    #       is REMOVED here because cloud-init will no longer install Docker.
+
     # S'assure que git est installé (utile même si cloud-init le fait, pour la robustesse)
     - name: Ensure git is installed (redundant with cloud-init, but good for robustness)
       ansible.builtin.apt:
@@ -28,7 +30,7 @@
         state: present
         update_cache: yes
 
-    # --- DÉBUT DES TÂCHES COMPLÈTES D'INSTALLATION DE DOCKER (CRUCIALES POUR LA ROBUSTESSE) ---
+    # --- DÉBUT DES TÂCHES COMPLÈTES D'INSTALLATION DE DOCKER (MAINTENANT SEULEMENT PAR ANSIBLE) ---
     # Ces tâches assurent que Docker est bien installé par Ansible, indépendamment de cloud-init.
     - name: Update apt cache (ensure it's fresh for Docker installation)
       ansible.builtin.apt:
