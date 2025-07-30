@@ -12,15 +12,10 @@
    
     - name: Wait for SSH connection and cloud-init to finish (up to 300 seconds)
       ansible.builtin.wait_for_connection:
-        delay: 10 # Délai initial avant la première vérification
+        delay: 300 # Délai initial avant la première vérification
         timeout: 300 # Temps total maximum d'attente
         sleep: 10 # Intervalle entre les vérifications
-    - name: Wait for cloud-init to finish completely (max 360 sec)
-      ansible.builtin.shell: |
-        while [ "$(cloud-init status --wait 2>/dev/null)" != "status: done" ]; do
-          sleep 5
-        done
-      changed_when: false
+   
 
 
     - name: Ensure Git is installed (in case cloud-init missed it)
