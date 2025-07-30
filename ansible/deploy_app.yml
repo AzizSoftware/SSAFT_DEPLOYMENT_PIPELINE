@@ -47,16 +47,28 @@
         - gnupg-agent # Nécessaire pour 'gpg --dearmor'
         - software-properties-common
 
-    - name: Add Docker GPG apt key
-      ansible.builtin.apt_key:
+     - name: Download Docker GPG key
+      ansible.builtin.get_url:
         url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+        dest: /tmp/docker_gpg.key
+        mode: '0644' # Ensure correct permissions for download
+
+    - name: Add Docker GPG key to /usr/share/keyrings/
+      ansible.builtin.shell: |
+        gpg --dearmor < /tmp/docker_gpg.key > /usr/share/keyrings/docker-archive-keyring.gpg
+        chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+      args:
+        warn: false
+        creates: /usr/share/keyrings/docker-archive-keyring.gpg # Make it idempotent
+      become: yes # Ensure this task runs with sudo privileges
 
     - name: Add Docker APT repository
       ansible.builtin.apt_repository:
         repo: deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
         state: present
-        update_cache: yes # Mettre à jour le cache après l'ajout du dépôt
+        update_cache: yes # 
+
+    
 
     - name: Install Docker Engine and Docker Compose Plugin
       ansible.builtin.apt:
