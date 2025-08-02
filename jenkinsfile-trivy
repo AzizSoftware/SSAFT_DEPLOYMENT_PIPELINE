@@ -1,0 +1,75 @@
+pipeline {
+    agent any
+
+    environment {
+        REPORT_DIR = 'trivy-reports'
+        CD_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD'  // Nom exact du job Jenkins de déploiement
+    }
+
+    options {
+        timeout(time: 20, unit: 'MINUTES') // Timeout global du pipeline
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+                // Nettoyer le dossier report puis le recréer
+                sh '''
+                    rm -rf ${REPORT_DIR}
+                    mkdir -p ${REPORT_DIR}
+                '''
+            }
+        }
+
+        stage('Install Trivy') {
+            steps {
+                script {
+                    def trivyExists = sh(script: 'which trivy || true', returnStdout: true).trim()
+                    if (!trivyExists) {
+                        echo "Trivy not found, installing..."
+                        sh '''
+                            wget -qO- https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.43.0_Linux-64bit.tar.gz | tar xz -C /usr/local/bin --strip-components=1 trivy
+                            trivy --version
+                        '''
+                    } else {
+                        echo "Trivy already installed."
+                    }
+                }
+            }
+        }
+
+        stage('Run Trivy SAST + Config + Secret Scan') {
+            steps {
+                echo "Running Trivy scan on filesystem (source code only)..."
+
+                sh """
+                    trivy fs . \\
+                      --scanners vuln,secret,config,license \\
+                      --severity HIGH,CRITICAL \\
+                      --exit-code 1 \\
+                      --format table \\
+                      --output ${REPORT_DIR}/trivy-fs-report.txt
+                """
+            }
+        }
+
+        stage('Archive Trivy Reports') {
+            steps {
+                archiveArtifacts artifacts: "${REPORT_DIR}/*.txt", fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Trivy scan passed. Triggering deployment pipeline..."
+            build job: "${env.CD_PIPELINE}", wait: true
+        }
+
+        failure {
+            echo "❌ Trivy scan failed. Deployment aborted due to security/config issues."
+            error("Build failed due to Trivy scan failure.")
+        }
+    }
+}
