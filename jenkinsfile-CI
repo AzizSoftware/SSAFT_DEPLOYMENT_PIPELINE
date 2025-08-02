@@ -19,11 +19,11 @@ pipeline {
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: 'main']],
-                        userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']], // <--- TRÈS IMPORTANT : Utilisez l'ID de votre Personal Access Token GitHub ici
+                        userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']],
                         doNotPoll: true
                     ])
                     echo "Listing contents of the workspace after cloning the repository:"
-                    sh 'pwd' // Affiche le chemin complet du répertoire de travail
+                    sh 'pwd'
                     sh 'ls -lR'
                 }
             }
@@ -31,8 +31,20 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo "Installing dependencies in SSAFT/ using npm install..."
+                echo "Installing dependencies in SSATF/ and sub-projects using npm install..."
                 dir('SSATF') {
+                    sh 'npm install'
+
+                    dir('Services/DataAnalyserService') {
+                        sh 'npm install'
+                    }
+
+                    dir('Services/TransactionGenerationAPI') {
+                        sh 'npm install'
+                    }
+                }
+
+                dir('SSATF/Client_UI') {
                     sh 'npm install'
                 }
             }
