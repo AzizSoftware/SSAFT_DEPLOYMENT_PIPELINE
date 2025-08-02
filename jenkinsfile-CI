@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        NODEJS_VERSION = 'node-18'  // Assure-toi que cette version est installée via le plugin NodeJS
-        TEST_PIPELINE = 'SSAFT_TEST_PIPELINE' // Le nom exact du job Jenkins de test (Trivy, tests, etc.)
-        SSH_CREDENTIALS_ID = 'azure_vm_key' // Assurez-vous que c'est bien l'ID de votre Credential SSH Jenkins
+        NODEJS_VERSION = 'node-18'  // Make sure this NodeJS version is installed via the plugin
+        TEST_PIPELINE = 'SSAFT_TEST_PIPELINE' // Exact Jenkins job name for tests (Trivy, etc.)
+        SSH_CREDENTIALS_ID = 'azure_vm_key' // Jenkins SSH credentials ID
         APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
     }
 
@@ -22,7 +22,7 @@ pipeline {
                         userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']],
                         doNotPoll: true
                     ])
-                    echo "Listing contents of the workspace after cloning the repository:"
+                    echo "Listing contents after checkout:"
                     sh 'pwd'
                     sh 'ls -lR'
                 }
@@ -31,28 +31,38 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo "Installing dependencies in SSATF/ and sub-projects using npm install..."
-                dir('SSATF') {
+                echo "Installing dependencies in subprojects..."
+
+                dir('SSATF/Services/DataAnalyserService') {
+                    echo "Installing in DataAnalyserService"
                     sh 'npm install'
+                }
 
-                    dir('Services/DataAnalyserService') {
-                        sh 'npm install'
-                    }
-
-                    dir('Services/TransactionGenerationAPI') {
-                        sh 'npm install'
-                    }
+                dir('SSATF/Services/TransactionGenerationAPI') {
+                    echo "Installing in TransactionGenerationAPI"
+                    sh 'npm install'
                 }
 
                 dir('SSATF/Client_UI') {
+                    echo "Installing in Client_UI"
                     sh 'npm install'
                 }
             }
         }
 
-        stage('Run Code Coverage') {
+        stage('Run Tests & Code Coverage') {
             steps {
-                dir('SSATF') {
+                echo "Running tests in subprojects..."
+
+                dir('SSATF/Services/DataAnalyserService') {
+                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
+                }
+
+                dir('SSATF/Services/TransactionGenerationAPI') {
+                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
+                }
+
+                dir('SSATF/Client_UI') {
                     sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
                 }
             }
@@ -60,8 +70,17 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo "Running build in SSATF/..."
-                dir('SSATF') {
+                echo "Building subprojects..."
+
+                dir('SSATF/Services/DataAnalyserService') {
+                    sh 'npm run build'
+                }
+
+                dir('SSATF/Services/TransactionGenerationAPI') {
+                    sh 'npm run build'
+                }
+
+                dir('SSATF/Client_UI') {
                     sh 'npm run build'
                 }
             }
