@@ -32,7 +32,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo "Installing dependencies in SSAFT/ using npm install..."
-                dir('SSAFT') {
+                dir('SSATF') {
                     sh 'npm install'
                 }
             }
@@ -40,7 +40,7 @@ pipeline {
 
         stage('Run Code Coverage') {
             steps {
-                dir('SSAFT') {
+                dir('SSATF') {
                     sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
                 }
             }
@@ -48,8 +48,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo "Running build in SSAFT/..."
-                dir('SSAFT') {
+                echo "Running build in SSATF/..."
+                dir('SSATF') {
                     sh 'npm run build'
                 }
             }
