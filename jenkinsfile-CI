@@ -13,7 +13,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout Repo') {
             steps {
                 script {
@@ -29,16 +28,19 @@ pipeline {
                 }
             }
         }
+
         stage('Install Dependencies') {
             steps {
-                echo "Installing dependencies using npm ci..."
-                sh 'npm install'
+                echo "Installing dependencies in SSAFT/ using npm install..."
+                dir('SSAFT') {
+                    sh 'npm install'
+                }
             }
         }
 
-         stage('Run Code Coverage') {
+        stage('Run Code Coverage') {
             steps {
-                script {
+                dir('SSAFT') {
                     sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
                 }
             }
@@ -46,8 +48,10 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo "Running build..."
-                sh 'npm run build'
+                echo "Running build in SSAFT/..."
+                dir('SSAFT') {
+                    sh 'npm run build'
+                }
             }
         }
     }
