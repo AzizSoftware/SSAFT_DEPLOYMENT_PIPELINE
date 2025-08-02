@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         NODEJS_VERSION = 'node-18'  // Assure-toi que cette version est installée via le plugin NodeJS
-        TEST_PIPELINE = 'Test-Pipeline' // Le nom exact du job Jenkins de test (Trivy, tests, etc.)
+        TEST_PIPELINE = 'SSAFT_TEST_PIPELINE' // Le nom exact du job Jenkins de test (Trivy, tests, etc.)
         SSH_CREDENTIALS_ID = 'azure_vm_key' // Assurez-vous que c'est bien l'ID de votre Credential SSH Jenkins
         APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
     }
