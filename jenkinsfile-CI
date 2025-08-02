@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+
+    environment {
+        NODEJS_VERSION = 'node-18'  // Assure-toi que cette version est installée via le plugin NodeJS
+        TEST_PIPELINE = 'Test-Pipeline' // Le nom exact du job Jenkins de test (Trivy, tests, etc.)
+        SSH_CREDENTIALS_ID = 'azure_vm_key' // Assurez-vous que c'est bien l'ID de votre Credential SSH Jenkins
+        APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
+    }
+
+    tools {
+        nodejs "${env.NODEJS_VERSION}"
+    }
+
+    stages {
+
+        stage('Checkout Repo') {
+            steps {
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: 'main']],
+                        userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']], // <--- TRÈS IMPORTANT : Utilisez l'ID de votre Personal Access Token GitHub ici
+                        doNotPoll: true
+                    ])
+                    echo "Listing contents of the workspace after cloning the repository:"
+                    sh 'pwd' // Affiche le chemin complet du répertoire de travail
+                    sh 'ls -lR'
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                echo "Installing dependencies using npm ci..."
+                sh 'npm ci'
+            }
+        }
+
+         stage('Run Code Coverage') {
+            steps {
+                script {
+                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo "Running build..."
+                sh 'npm run build'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "CI pipeline succeeded. Triggering Test Pipeline..."
+            build job: "${env.TEST_PIPELINE}", wait: true
+        }
+
+        failure {
+            echo "CI pipeline failed. Aborting further steps."
+        }
+    }
+}
