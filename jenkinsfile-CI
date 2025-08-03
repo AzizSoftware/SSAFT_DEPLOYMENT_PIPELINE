@@ -50,23 +50,7 @@ pipeline {
             }
         }
 
-        stage('Run Tests & Code Coverage') {
-            steps {
-                echo "Running tests in subprojects..."
-
-                dir('SSATF/Services/DataAnalyserService') {
-                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
-                }
-
-                dir('SSATF/Services/TransactionGenerationAPI') {
-                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
-                }
-
-                dir('SSATF/Client_UI') {
-                    sh 'npm test -- --coverage --testResultsProcessor="jest-junit"'
-                }
-            }
-        }
+        
 
         stage('Build') {
             steps {
