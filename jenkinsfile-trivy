@@ -1,5 +1,9 @@
 pipeline {
   agent any
+   environment {
+    DEPLOY_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD' // nom exact du pipeline de déploiement
+  }
+
   stages {
     stage('Checkout Code') {
       steps {
@@ -45,6 +49,8 @@ pipeline {
   post {
     success {
       echo "✅ Trivy scan passed!"
+      echo "Triggering Deployment Pipeline..."
+      build job: "${env.DEPLOY_PIPELINE}", wait: true
     }
     failure {
       echo "❌ Trivy scan failed. Please check the vulnerabilities."
