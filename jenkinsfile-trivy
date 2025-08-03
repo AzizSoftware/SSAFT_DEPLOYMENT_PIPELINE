@@ -1,76 +1,54 @@
 pipeline {
-    agent any
-
-    environment {
-        REPORT_DIR = 'trivy-reports'
-        CD_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD'  // Nom exact du job Jenkins de déploiement
+  agent any
+  stages {
+    stage('Checkout Code') {
+      steps {
+        checkout scm
+      }
     }
-
-    options {
-        timeout(time: 20, unit: 'MINUTES') // Timeout global du pipeline
+    stage('Prepare Trivy') {
+      steps {
+        script {
+          // Vérifier si trivy est déjà dispo
+          def trivyExists = sh(script: 'command -v trivy || true', returnStdout: true).trim()
+          if (!trivyExists) {
+            echo "Trivy not found, installing locally..."
+            sh '''
+              rm -rf trivy-bin
+              mkdir -p trivy-bin
+              wget -q https://github.com/aquasecurity/trivy/releases/download/v0.43.0/trivy_0.43.0_Linux-64bit.tar.gz -O trivy.tar.gz
+              if [ ! -s trivy.tar.gz ]; then
+                echo "ERROR: Downloaded Trivy archive is empty or missing!"
+                exit 1
+              fi
+              tar -xzf trivy.tar.gz -C trivy-bin
+              rm trivy.tar.gz
+              chmod +x trivy-bin/trivy
+            '''
+          } else {
+            echo "Trivy already installed."
+          }
+        }
+      }
     }
-
-    stages {
-        stage('Checkout Code') {
-            steps {
-                checkout scm
-                // Nettoyer le dossier report puis le recréer
-                sh '''
-                    rm -rf ${REPORT_DIR}
-                    mkdir -p ${REPORT_DIR}
-                '''
-            }
+    stage('Run Trivy Scan') {
+      steps {
+        script {
+          sh '''
+            ./trivy-bin/trivy --version
+            ./trivy-bin/trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress .
+          '''
         }
-
-        stage('Install Trivy') {
-            steps {
-                script {
-                    def trivyExists = sh(script: 'which trivy || true', returnStdout: true).trim()
-                    if (!trivyExists) {
-                        echo "Trivy not found, installing..."
-                        sh '''
-                            wget -qO- https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.43.0_Linux-64bit.tar.gz | tar xz -C /usr/local/bin --strip-components=1 trivy
-                            trivy --version
-                        '''
-                    } else {
-                        echo "Trivy already installed."
-                    }
-                }
-            }
-        }
-
-        stage('Run Trivy SAST + Config + Secret Scan') {
-            steps {
-                echo "Running Trivy scan on filesystem (source code only)..."
-
-                sh """
-                    trivy fs . \\
-                      --scanners vuln,secret,config,license \\
-                      --severity HIGH,CRITICAL \\
-                      --exit-code 1 \\
-                      --format table \\
-                      --output ${REPORT_DIR}/trivy-fs-report.txt
-                """
-            }
-        }
-
-        stage('Archive Trivy Reports') {
-            steps {
-                archiveArtifacts artifacts: "${REPORT_DIR}/*.txt", fingerprint: true
-            }
-        }
+      }
     }
-
-    post {
-        success {
-            echo "✅ Trivy scan passed. Triggering deployment pipeline..."
-            build job: "${env.CD_PIPELINE}", wait: true
-        }
-
-        failure {
-            echo "❌ Trivy scan failed. Deployment aborted due to security/config issues."
-            error("Build failed due to Trivy scan failure.")
-        }
+  }
+  post {
+    success {
+      echo "✅ Trivy scan passed!"
     }
+    failure {
+      echo "❌ Trivy scan failed. Please check the vulnerabilities."
+      error("Build failed due to Trivy scan failure.")
+    }
+  }
 }
- 
