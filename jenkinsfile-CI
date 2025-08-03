@@ -52,23 +52,7 @@ pipeline {
 
         
 
-        stage('Build') {
-            steps {
-                echo "Building subprojects..."
-
-                dir('SSATF/Services/DataAnalyserService') {
-                    sh 'npm run build'
-                }
-
-                dir('SSATF/Services/TransactionGenerationAPI') {
-                    sh 'npm run build'
-                }
-
-                dir('SSATF/Client_UI') {
-                    sh 'npm run build'
-                }
-            }
-        }
+        
     }
 
     post {
