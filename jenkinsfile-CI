@@ -49,17 +49,24 @@ pipeline {
 
                         echo "🔁 Version bumped to ${newVersion} in ${modulePath}"
 
-                        // Commit & Push the bump on new branch
-                        sh """
-                            cd ${modulePath}
-                            git config user.email "jenkins@azizsoftware.com"
-                            git config user.name "Jenkins CI"
-                            git checkout -b updated-version-${newVersion}
-                            git add package.json
-                            git commit -m "🔼 Bump version to ${newVersion}"
-                            git push origin updated-version-${newVersion}
-                            cd -
-                        """
+                        // Commit & Push the bump on new branch using credentials
+                        withCredentials([usernamePassword(
+                            credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
+                            usernameVariable: 'GIT_USER',
+                            passwordVariable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                cd ${modulePath}
+                                git config user.email "jenkins@azizsoftware.com"
+                                git config user.name "Jenkins CI"
+                                git checkout -b updated-version-${newVersion}
+                                git add package.json
+                                git commit -m "🔼 Bump version to ${newVersion}"
+                                git remote set-url origin https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git
+                                git push origin updated-version-${newVersion}
+                                cd -
+                            """
+                        }
                     }
                 }
             }
@@ -97,4 +104,4 @@ pipeline {
             echo "❌ CI pipeline failed. Aborting further steps."
         }
     }
-} 
+}
