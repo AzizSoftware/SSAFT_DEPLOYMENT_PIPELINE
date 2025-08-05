@@ -9,11 +9,15 @@ pipeline {
         AZURE_CLIENT_ID_CRED = 'azure-client-id'
         AZURE_CLIENT_SECRET_CRED = 'azure-client-secret'
         AZURE_TENANT_ID_CRED = 'azure-tenant-id'
+
+        // New environment variables for Azure Blob Storage
+        // IMPORTANT: Replace 'yourstorageaccountname' and 'app-releases' with your actual Azure Storage Account and Container names.
+        AZURE_STORAGE_ACCOUNT_NAME = 'ssaftyouruniqueappstorage' // Updated with your storage account name
+        AZURE_STORAGE_CONTAINER_NAME = 'app-releases' // Updated with your container name
     }
 
     stages {
-
-        stage('Checkout Repo') {
+        stage('Checkout Main Repo') { // Renamed for clarity on which branch is checked out
             steps {
                 script {
                     checkout([
@@ -29,139 +33,219 @@ pipeline {
             }
         }
 
-        stage('Terraform Init and Apply') {
+        stage('Parallel Deployments and Artifact Publishing') {
             steps {
-                dir('terraform') {
-                    withCredentials([
-                        string(credentialsId: env.AZURE_SUB_ID_CRED, variable: 'ARM_SUBSCRIPTION_ID'),
-                        string(credentialsId: env.AZURE_CLIENT_ID_CRED, variable: 'ARM_CLIENT_ID'),
-                        string(credentialsId: env.AZURE_CLIENT_SECRET_CRED, variable: 'ARM_CLIENT_SECRET'),
-                        string(credentialsId: env.AZURE_TENANT_ID_CRED, variable: 'ARM_TENANT_ID')
-                    ]) {
-                        sh '''
-                            # Optionnel : Détruire l'ancienne infra avant de recréer (décommenter si vous voulez un clean slate à chaque fois)
-                            # terraform destroy -auto-approve \
-                            #   -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-                            #   -var="client_id=$ARM_CLIENT_ID" \
-                            #   -var="client_secret=$ARM_CLIENT_SECRET" \
-                            #   -var="tenant_id=$ARM_TENANT_ID" || true # '|| true' pour ne pas échouer si rien à détruire
+                parallel {
+                    // This branch handles the existing infrastructure and application deployment
+                    stage('Infrastructure and Application Deployment') {
+                        stages { // Nested stages for sequential execution within this parallel branch
+                            stage('Terraform Init and Apply') {
+                                steps {
+                                    dir('terraform') {
+                                        withCredentials([
+                                            string(credentialsId: env.AZURE_SUB_ID_CRED, variable: 'ARM_SUBSCRIPTION_ID'),
+                                            string(credentialsId: env.AZURE_CLIENT_ID_CRED, variable: 'ARM_CLIENT_ID'),
+                                            string(credentialsId: env.AZURE_CLIENT_SECRET_CRED, variable: 'ARM_CLIENT_SECRET'),
+                                            string(credentialsId: env.AZURE_TENANT_ID_CRED, variable: 'ARM_TENANT_ID')
+                                        ]) {
+                                            sh '''
+                                                # Optionnel : Détruire l'ancienne infra avant de recréer (décommenter si vous voulez un clean slate à chaque fois)
+                                                # terraform destroy -auto-approve \\
+                                                #   -var="subscription_id=$ARM_SUBSCRIPTION_ID" \\
+                                                #   -var="client_id=$ARM_CLIENT_ID" \\
+                                                #   -var="client_secret=$ARM_CLIENT_SECRET" \\
+                                                #   -var="tenant_id=$ARM_TENANT_ID" || true # '|| true' pour ne pas échouer si rien à détruire
 
-                            terraform init -reconfigure # Reconfigure au cas où le backend change
-                            terraform plan \
-                                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-                                -var="client_id=$ARM_CLIENT_ID" \
-                                -var="client_secret=$ARM_CLIENT_SECRET" \
-                                -var="tenant_id=$ARM_TENANT_ID"
+                                                terraform init -reconfigure # Reconfigure au cas où le backend change
+                                                terraform plan \\
+                                                    -var="subscription_id=$ARM_SUBSCRIPTION_ID" \\
+                                                    -var="client_id=$ARM_CLIENT_ID" \\
+                                                    -var="client_secret=$ARM_CLIENT_SECRET" \\
+                                                    -var="tenant_id=$ARM_TENANT_ID"
 
-                            terraform apply -auto-approve \
-                                -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-                                -var="client_id=$ARM_CLIENT_ID" \
-                                -var="client_secret=$ARM_CLIENT_SECRET" \
-                                -var="tenant_id=$ARM_TENANT_ID"
-                        '''
+                                                terraform apply -auto-approve \\
+                                                    -var="subscription_id=$ARM_SUBSCRIPTION_ID" \\
+                                                    -var="client_id=$ARM_CLIENT_ID" \\
+                                                    -var="client_secret=$ARM_CLIENT_SECRET" \\
+                                                    -var="tenant_id=$ARM_TENANT_ID"
+                                            '''
+                                        }
+                                    }
+                                }
+                            }
+
+                            stage('Wait for VM & SSH Readiness') {
+                                steps {
+                                    script {
+                                        def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+                                        echo "VM IP for SSH: ${vmIp}"
+
+                                        // Assurez-vous que le répertoire .ssh et le fichier known_hosts existent avec les bonnes permissions
+                                        sh """
+                                            mkdir -p ~/.ssh
+                                            chmod 700 ~/.ssh
+                                            touch ~/.ssh/known_hosts
+                                            chmod 600 ~/.ssh/known_hosts
+                                        """
+                                        // REMARQUE IMPORTANTE : ssh-keygen -R a été déplacé dans la stage Ansible Deploy.
+
+                                        echo "Waiting for SSH on ${vmIp}:22 to be available..."
+                                        sh '''
+                                            count=0
+                                            while ! nc -z -v -w 10 ''' + vmIp + ''' 22; do
+                                                echo "Still waiting for SSH to be available on ''' + vmIp + '''..."
+                                                sleep 5
+                                                count=$((count+1))
+                                                if [ $count -ge 18 ]; then
+                                                    echo "SSH connection timed out after 90 seconds. Aborting."
+                                                    exit 1
+                                                fi
+                                            done
+                                            echo "SSH is now open on ''' + vmIp + '''!"
+                                        '''
+                                    }
+                                }
+                            }
+
+                            stage('Ansible Deploy') {
+                                steps {
+                                    dir('ansible') {
+                                        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')]) {
+                                            script {
+                                                def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
+                                                def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
+
+                                                // --- BLOC DE DÉBOGAGE SSH POUR LA CLÉ PRIVÉE (qui a maintenant réussi !) ---
+                                                echo "Performing initial SSH connection to verify private key and reachability for ${vmIp}..."
+                                                sh """
+                                                    set -x # Active le traçage des commandes shell pour le débogage
+
+                                                    echo "Contents of ~/.ssh/known_hosts BEFORE SSH attempt:"
+                                                    cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty."
+
+                                                    # Supprime l'ancienne clé d'hôte (pour la propreté, même si le problème est ailleurs)
+                                                    ssh-keygen -R ${vmIp} || true
+
+                                                    echo "Contents of ~/.ssh/known_hosts AFTER ssh-keygen -R:"
+                                                    cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty after removal."
+
+                                                    # Tente une connexion SSH simple pour tester l'authentification et voir l'erreur 'libcrypto'
+                                                    # Nous laissons la vérification de clé hôte revenir à son comportement par défaut ici pour isoler l'erreur de clé privée.
+                                                    ssh -vvv -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${ANSIBLE_PRIVATE_KEY_FILE_PATH} \\
+                                                        ${vmAdminUsername}@${vmIp} exit 2>&1 | tee ssh_debug.log
+                                                    
+                                                    SSH_EXIT_CODE=\$?
+                                                    cat ssh_debug.log # Affiche le journal de débogage SSH
+
+                                                    if [ \$SSH_EXIT_CODE -ne 0 ]; then
+                                                        echo "Initial SSH connection FAILED with exit code \$SSH_EXIT_CODE."
+                                                        echo "This indicates an issue with the SSH key, its passphrase, or its format (likely 'error in libcrypto')."
+                                                        echo "Please review ssh_debug.log above for details and re-verify your SSH private key credential."
+                                                        exit 1 # Fait échouer le pipeline si la connexion SSH initiale échoue
+                                                    fi
+                                                    
+                                                    echo "Initial SSH connection successful (private key seems to be accepted by SSH client for parsing)."
+                                                    echo "Contents of ~/.ssh/known_hosts AFTER initial SSH connection:"
+                                                    cat ~/.ssh/known_hosts
+                                                """
+                                                // --- FIN DU BLOC DE DÉBOGAGE ---
+
+                                                // Générer le fichier inventory.ini DYNAMIQUEMENT pour Ansible
+                                                sh """
+                                                    echo "[webservers]" > inventory.ini
+                                                    echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
+                                                    echo "" >> inventory.ini
+                                                    echo "[all:vars]" >> inventory.ini
+                                                    echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
+                                                    echo "Generated Ansible inventory for VM at: ${vmIp}"
+                                                """
+                                                // Exécuter le playbook Ansible
+                                                withEnv(["ANSIBLE_KEY_VAR=${ANSIBLE_PRIVATE_KEY_FILE_PATH}"]) {
+                                                    sh """
+                                                        ansible-playbook deploy_app.yml \\
+                                                            -i inventory.ini \\
+                                                            --private-key=\${ANSIBLE_KEY_VAR} \\
+                                                            -e app_repo_url=${env.APP_REPO_URL} \\
+                                                            -e ansible_host_key_checking=False \\
+                                                            -e "ansible_ssh_extra_args='-o UserKnownHostsFile=/dev/null'" # <--- TRÈS IMPORTANT : APPLIQUER CETTE CORRECTION
+                                                    """
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
-            }
-        }
-        
 
-        stage('Wait for VM & SSH Readiness') {
-            steps {
-                script {
-                    def vmIp = sh(script: "cd terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
-                    echo "VM IP for SSH: ${vmIp}"
+                    // This new branch handles packaging the application and deploying it to Azure Blob Storage
+                    stage('Package and Deploy Application Artifact') {
+                        steps {
+                            script {
+                                // Determine the branch to clone.
+                                // This assumes the upstream CI job passes its BUILD_NUMBER to this CD job,
+                                // allowing us to construct the specific version-bump branch name.
+                                def targetBranch = "version-bump-pipeline-${env.BUILD_NUMBER}"
+                                echo "Attempting to package and deploy code from branch: ${targetBranch}"
 
-                    // Assurez-vous que le répertoire .ssh et le fichier known_hosts existent avec les bonnes permissions
-                    sh """
-                        mkdir -p ~/.ssh
-                        chmod 700 ~/.ssh
-                        touch ~/.ssh/known_hosts
-                        chmod 600 ~/.ssh/known_hosts
-                    """
-                    // REMARQUE IMPORTANTE : ssh-keygen -R a été déplacé dans la stage Ansible Deploy.
+                                // Create a temporary directory for this specific operation to avoid conflicts
+                                // Using a unique name based on BUILD_NUMBER helps with concurrent runs
+                                dir("package_and_deploy_temp_${env.BUILD_NUMBER}") {
+                                    // 1. Clone the repository to this temporary directory
+                                    echo "Cloning repository ${env.APP_REPO_URL} branch ${targetBranch}..."
+                                    checkout([
+                                        $class: 'GitSCM',
+                                        branches: [[name: targetBranch]], // Checkout the specific version-bump branch
+                                        userRemoteConfigs: [[
+                                            url: env.APP_REPO_URL,
+                                            credentialsId: 'github-pat-azizsoftware'
+                                        ]],
+                                        doNotPoll: true,
+                                        // wipeWorkspace: true // Uncomment if you want to ensure a completely clean clone each time
+                                    ])
+                                    echo "Repository cloned. Listing contents:"
+                                    sh 'ls -lR'
 
-                    echo "Waiting for SSH on ${vmIp}:22 to be available..."
-                    sh '''
-                        count=0
-                        while ! nc -z -v -w 10 ''' + vmIp + ''' 22; do
-                            echo "Still waiting for SSH to be available on ''' + vmIp + '''..."
-                            sleep 5
-                            count=$((count+1))
-                            if [ $count -ge 18 ]; then
-                                echo "SSH connection timed out after 90 seconds. Aborting."
-                                exit 1
-                            fi
-                        done
-                        echo "SSH is now open on ''' + vmIp + '''!"
-                    '''
-                }
-            }
-        }
+                                    // 2. Archive the code
+                                    // Ensure the archive name is unique and reflects the version
+                                    def archiveFileName = "ssa-ft-app-v${env.BUILD_NUMBER}.tar.gz"
+                                    echo "Archiving application code into ${archiveFileName}..."
+                                    // Assuming the SSATF directory contains all relevant code to be archived
+                                    sh "tar -czf ${archiveFileName} SSATF"
+                                    echo "Archive created: ${archiveFileName}"
 
-        
+                                    // 3. Deploy to Azure Blob Storage
+                                    withCredentials([
+                                        string(credentialsId: env.AZURE_SUB_ID_CRED, variable: 'ARM_SUBSCRIPTION_ID'),
+                                        string(credentialsId: env.AZURE_CLIENT_ID_CRED, variable: 'ARM_CLIENT_ID'),
+                                        string(credentialsId: env.AZURE_CLIENT_SECRET_CRED, variable: 'ARM_CLIENT_SECRET'),
+                                        string(credentialsId: env.AZURE_TENANT_ID_CRED, variable: 'ARM_TENANT_ID')
+                                    ]) {
+                                        // Set Azure environment variables for authentication
+                                        withEnv([
+                                            "AZURE_STORAGE_ACCOUNT_NAME=${env.AZURE_STORAGE_ACCOUNT_NAME}",
+                                            "AZURE_STORAGE_CONTAINER_NAME=${env.AZURE_STORAGE_CONTAINER_NAME}"
+                                        ]) {
+                                            echo "Deploying ${archiveFileName} to Azure Blob Storage..."
+                                            sh """
+                                                # Login to Azure using Service Principal
+                                                az login --service-principal -u "\$ARM_CLIENT_ID" -p "\$ARM_CLIENT_SECRET" --tenant "\$ARM_TENANT_ID" > /dev/null
+                                                az account set --subscription "\$ARM_SUBSCRIPTION_ID"
 
-        stage('Ansible Deploy') {
-            steps {
-                dir('ansible') {
-                    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDENTIALS_ID, keyFileVariable: 'ANSIBLE_PRIVATE_KEY_FILE_PATH')]) {
-                        script {
-                            def vmIp = sh(script: "cd ../terraform && terraform output -raw public_ip_address", returnStdout: true).trim()
-                            def vmAdminUsername = sh(script: "cd ../terraform && terraform output -raw vm_admin_username", returnStdout: true).trim()
+                                                # Upload the archive to Azure Blob Storage
+                                                az storage blob upload \\
+                                                    --account-name "\${AZURE_STORAGE_ACCOUNT_NAME}" \\
+                                                    --container-name "\${AZURE_STORAGE_CONTAINER_NAME}" \\
+                                                    --file "${archiveFileName}" \\
+                                                    --name "${archiveFileName}" \\
+                                                    --overwrite true # Overwrite if blob with same name exists
 
-                            // --- BLOC DE DÉBOGAGE SSH POUR LA CLÉ PRIVÉE (qui a maintenant réussi !) ---
-                            echo "Performing initial SSH connection to verify private key and reachability for ${vmIp}..."
-                            sh """
-                                set -x # Active le traçage des commandes shell pour le débogage
-
-                                echo "Contents of ~/.ssh/known_hosts BEFORE SSH attempt:"
-                                cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty."
-
-                                # Supprime l'ancienne clé d'hôte (pour la propreté, même si le problème est ailleurs)
-                                ssh-keygen -R ${vmIp} || true
-
-                                echo "Contents of ~/.ssh/known_hosts AFTER ssh-keygen -R:"
-                                cat ~/.ssh/known_hosts || echo "known_hosts does not exist or is empty after removal."
-
-                                # Tente une connexion SSH simple pour tester l'authentification et voir l'erreur 'libcrypto'
-                                # Nous laissons la vérification de clé hôte revenir à son comportement par défaut ici pour isoler l'erreur de clé privée.
-                                ssh -vvv -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${ANSIBLE_PRIVATE_KEY_FILE_PATH} \
-                                    ${vmAdminUsername}@${vmIp} exit 2>&1 | tee ssh_debug.log
-                                
-                                SSH_EXIT_CODE=\$?
-                                cat ssh_debug.log # Affiche le journal de débogage SSH
-
-                                if [ \$SSH_EXIT_CODE -ne 0 ]; then
-                                    echo "Initial SSH connection FAILED with exit code \$SSH_EXIT_CODE."
-                                    echo "This indicates an issue with the SSH key, its passphrase, or its format (likely 'error in libcrypto')."
-                                    echo "Please review ssh_debug.log above for details and re-verify your SSH private key credential."
-                                    exit 1 # Fait échouer le pipeline si la connexion SSH initiale échoue
-                                fi
-                                
-                                echo "Initial SSH connection successful (private key seems to be accepted by SSH client for parsing)."
-                                echo "Contents of ~/.ssh/known_hosts AFTER initial SSH connection:"
-                                cat ~/.ssh/known_hosts
-                            """
-                            // --- FIN DU BLOC DE DÉBOGAGE ---
-
-                            // Générer le fichier inventory.ini DYNAMIQUEMENT pour Ansible
-                            sh """
-                                echo "[webservers]" > inventory.ini
-                                echo "azure_vm ansible_host=${vmIp} ansible_user=${vmAdminUsername}" >> inventory.ini
-                                echo "" >> inventory.ini
-                                echo "[all:vars]" >> inventory.ini
-                                echo "ansible_python_interpreter=/usr/bin/python3" >> inventory.ini
-                                echo "Generated Ansible inventory for VM at: ${vmIp}"
-                            """
-                            // Exécuter le playbook Ansible
-                            withEnv(["ANSIBLE_KEY_VAR=${ANSIBLE_PRIVATE_KEY_FILE_PATH}"]) {
-                                sh """
-                                    ansible-playbook deploy_app.yml \\
-                                      -i inventory.ini \\
-                                      --private-key=\${ANSIBLE_KEY_VAR} \\
-                                      -e app_repo_url=${env.APP_REPO_URL} \\
-                                      -e ansible_host_key_checking=False \\
-                                      -e "ansible_ssh_extra_args='-o UserKnownHostsFile=/dev/null'" # <--- TRÈS IMPORTANT : APPLIQUER CETTE CORRECTION
-                                """
+                                                echo "Successfully deployed ${archiveFileName} to Azure Blob Storage."
+                                                az logout > /dev/null
+                                            """
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -169,7 +253,7 @@ pipeline {
             }
         }
 
-        stage('Smoke Test') {
+        stage('Smoke Test') { // This stage runs AFTER both parallel branches complete
             steps {
                 dir('terraform') {
                     script {
@@ -179,6 +263,15 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ CD pipeline succeeded."
+        }
+        failure {
+            echo "❌ CD pipeline failed. Aborting further steps."
         }
     }
 }
