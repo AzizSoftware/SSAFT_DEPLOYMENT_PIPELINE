@@ -99,7 +99,9 @@ pipeline {
     post {
         success {
             echo "✅ CI pipeline succeeded. Triggering Test Pipeline..."
-            build job: "${env.TEST_PIPELINE}", wait: true
+            build job: "${env.TEST_PIPELINE}", wait: true, parameters: [
+                string(name: 'UPGRADE_BRANCH_NAME', value: env.UPGRADE_BRANCH_NAME)
+            ]
         }
         failure {
             echo "❌ CI pipeline failed. Aborting further steps."
