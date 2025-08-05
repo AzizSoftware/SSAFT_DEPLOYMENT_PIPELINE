@@ -1,5 +1,8 @@
 pipeline {
     agent any
+    parameters {
+        string(name: 'UPGRADE_BRANCH_NAME', defaultValue: 'main', description: 'Branch name to deploy from')
+    }
  
     environment {
         SSH_CREDENTIALS_ID = 'azure_vm_key'
@@ -131,7 +134,7 @@ pipeline {
                     agent any
                     steps {
                         script {
-                            def targetBranch = "Upgrade-branch"
+                            def targetBranch = params.UPGRADE_BRANCH_NAME
                             dir("package_and_deploy_temp_${env.BUILD_NUMBER}") {
                                 checkout([
                                     $class: 'GitSCM',
