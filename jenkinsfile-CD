@@ -10,7 +10,7 @@ pipeline {
         AZURE_CLIENT_SECRET_CRED = 'azure-client-secret'
         AZURE_TENANT_ID_CRED = 'azure-tenant-id'
 
-        AZURE_STORAGE_ACCOUNT_NAME = 'ssaftyouruniqueappstorage'
+        AZURE_STORAGE_ACCOUNT_NAME = 'ssaftappstorage'
         AZURE_STORAGE_CONTAINER_NAME = 'app-releases'
     }
 
