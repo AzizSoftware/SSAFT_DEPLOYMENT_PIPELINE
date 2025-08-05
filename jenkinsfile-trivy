@@ -1,6 +1,8 @@
 pipeline {
     agent any
-
+    parameters {
+        string(name: 'UPGRADE_BRANCH_NAME', defaultValue: 'main', description: 'Branch to deploy after Trivy scan')
+    }
     environment {
         DEPLOY_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD' // nom exact du pipeline de déploiement
     }
@@ -62,7 +64,9 @@ pipeline {
         success {
             echo "✅ Trivy scan passed!"
             echo "Triggering Deployment Pipeline..."
-            build job: "${env.DEPLOY_PIPELINE}", wait: true
+            build job: "${env.DEPLOY_PIPELINE}", wait: true, parameters: [
+                string(name: 'UPGRADE_BRANCH_NAME', value: params.UPGRADE_BRANCH_NAME)
+            ]
         }
         failure {
             echo "❌ Trivy scan failed. Please check the vulnerabilities."
