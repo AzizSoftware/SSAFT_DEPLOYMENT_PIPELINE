@@ -1,60 +1,72 @@
 pipeline {
-  agent any
-   environment {
-    DEPLOY_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD' // nom exact du pipeline de déploiement
-  }
+    agent any
 
-  stages {
-    stage('Checkout Code') {
-      steps {
-        checkout scm
-      }
+    environment {
+        DEPLOY_PIPELINE = 'SSAFT_DEPLOYMENT_ON_AZURE_CLOUD' // nom exact du pipeline de déploiement
     }
-    stage('Prepare Trivy') {
-      steps {
-        script {
-          // Vérifier si trivy est déjà dispo
-          def trivyExists = sh(script: 'command -v trivy || true', returnStdout: true).trim()
-          if (!trivyExists) {
-            echo "Trivy not found, installing locally..."
-            sh '''
-              rm -rf trivy-bin
-              mkdir -p trivy-bin
-              wget -q https://github.com/aquasecurity/trivy/releases/download/v0.43.0/trivy_0.43.0_Linux-64bit.tar.gz -O trivy.tar.gz
-              if [ ! -s trivy.tar.gz ]; then
-                echo "ERROR: Downloaded Trivy archive is empty or missing!"
-                exit 1
-              fi
-              tar -xzf trivy.tar.gz -C trivy-bin
-              rm trivy.tar.gz
-              chmod +x trivy-bin/trivy
-            '''
-          } else {
-            echo "Trivy already installed."
-          }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
-    stage('Run Trivy Scan') {
-      steps {
-        script {
-          sh '''
-            ./trivy-bin/trivy --version
-            ./trivy-bin/trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress .
-          '''
+
+        stage('Prepare Trivy') {
+            steps {
+                script {
+                    // Vérifier si trivy est déjà dispo
+                    def trivyExists = sh(script: 'command -v trivy || true', returnStdout: true).trim()
+                    if (!trivyExists) {
+                        echo "Trivy not found, installing locally..."
+                        sh '''
+                            rm -rf trivy-bin
+                            mkdir -p trivy-bin
+                            wget -q https://github.com/aquasecurity/trivy/releases/download/v0.43.0/trivy_0.43.0_Linux-64bit.tar.gz -O trivy.tar.gz
+                            if [ ! -s trivy.tar.gz ]; then
+                                echo "ERROR: Downloaded Trivy archive is empty or missing!"
+                                exit 1
+                            fi
+                            tar -xzf trivy.tar.gz -C trivy-bin
+                            rm trivy.tar.gz
+                            chmod +x trivy-bin/trivy
+                        '''
+                    } else {
+                        echo "Trivy already installed."
+                    }
+                }
+            }
         }
-      }
+
+        stage('Run Trivy Scan') {
+            steps {
+                script {
+                    echo "Running Trivy scan..."
+                    def trivyStatus = sh(script: '''
+                        ./trivy-bin/trivy --version
+                        ./trivy-bin/trivy fs --exit-code 1 --severity HIGH,CRITICAL --no-progress .
+                    ''', returnStatus: true) // Capture l’exit code
+
+                    if (trivyStatus != 0) {
+                        echo "❌ Trivy scan found HIGH or CRITICAL vulnerabilities. Failing pipeline."
+                        error("Build failed due to Trivy scan finding vulnerabilities.")
+                    } else {
+                        echo "✅ Trivy scan passed! No HIGH or CRITICAL vulnerabilities found."
+                    }
+                }
+            }
+        }
     }
-  }
-  post {
-    success {
-      echo "✅ Trivy scan passed!"
-      echo "Triggering Deployment Pipeline..."
-      build job: "${env.DEPLOY_PIPELINE}", wait: true
+
+    post {
+        success {
+            echo "✅ Trivy scan passed!"
+            echo "Triggering Deployment Pipeline..."
+            build job: "${env.DEPLOY_PIPELINE}", wait: true
+        }
+        failure {
+            echo "❌ Trivy scan failed. Please check the vulnerabilities."
+            error("Build failed due to Trivy scan failure.")
+        }
     }
-    failure {
-      echo "❌ Trivy scan failed. Please check the vulnerabilities."
-      error("Build failed due to Trivy scan failure.")
-    }
-  }
 }
