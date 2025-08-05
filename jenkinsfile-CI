@@ -75,19 +75,12 @@ pipeline {
                             # Using BUILD_NUMBER for uniqueness, ensures a clean branch for each run
                             export BRANCH_NAME="version-bump-pipeline-${env.BUILD_NUMBER}"
 
-                            # Clean up the previous local branch if it exists and we're on it
-                            if git rev-parse --verify "\${BRANCH_NAME}" &>/dev/null; then
-                                current_branch=\$(git rev-parse --abbrev-ref HEAD)
-                                if [ "\$current_branch" = "\${BRANCH_NAME}" ]; then
-                                    git checkout main
-                                fi
-                                git branch -D "\${BRANCH_NAME}"
-                            fi
+                            # Attempt to switch to main if currently on the target branch, then delete local branch.
+                            # The '|| true' ensures the step doesn't fail if the branch doesn't exist locally or if checkout fails.
+                            (git checkout main && git branch -D "\${BRANCH_NAME}") || true
 
-                            # Clean up the previous remote branch if it exists
-                            if git ls-remote --exit-code --heads origin "\${BRANCH_NAME}" &>/dev/null; then
-                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete "\${BRANCH_NAME}"
-                            fi
+                            # Attempt to delete the remote branch, ignoring errors if it doesn't exist.
+                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete "\${BRANCH_NAME}" || true
 
                             # Create and switch to the new branch
                             git checkout -b "\${BRANCH_NAME}"
