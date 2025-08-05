@@ -2,7 +2,7 @@ pipeline {
     agent any 
 
     environment {
-        NODEJS_VERSION = 'node-18'
+        NODEJS_VERSION = 'node-18' 
         TEST_PIPELINE = 'SSAFT_TEST_PIPELINE'
         SSH_CREDENTIALS_ID = 'azure_vm_key'
         APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
