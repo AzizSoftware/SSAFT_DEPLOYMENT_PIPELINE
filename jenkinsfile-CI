@@ -73,7 +73,7 @@ pipeline {
 
                             # Define a consistent branch name for this pipeline run
                             # Using BUILD_NUMBER for uniqueness, ensures a clean branch for each run
-                            export BRANCH_NAME="version-bump-pipeline-${env.BUILD_NUMBER}"
+                            export BRANCH_NAME="Upgrade-branch"
 
                             # Attempt to switch to main if currently on the target branch, then delete local branch.
                             # The '|| true' ensures the step doesn't fail if the branch doesn't exist locally or if checkout fails.
