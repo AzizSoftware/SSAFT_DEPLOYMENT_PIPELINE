@@ -60,13 +60,21 @@ pipeline {
                 sh """
                     git config user.email "jenkins@azizsoftware.com"
                     git config user.name "Jenkins CI"
-
+                
                     git checkout main || true
                     git pull
-
-                    git checkout -b ${branchName}
+                
+                    if git rev-parse --verify ${branchName} >/dev/null 2>&1; then
+                        echo "✅ Branche ${branchName} déjà existante, on fait checkout"
+                        git checkout ${branchName}
+                    else
+                        echo "🔧 Création de la branche ${branchName}"
+                        git checkout -b ${branchName}
+                    fi
+                
                     git add ${pkgPath}
-                    git commit -m "🔼 Bump version to ${newVersion}"
+                    git diff --cached --quiet || git commit -m "🔼 Bump version to ${newVersion}"
+                
                     git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git ${branchName}
                 """
             }
