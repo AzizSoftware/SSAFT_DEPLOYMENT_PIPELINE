@@ -59,8 +59,9 @@ pipeline {
                         )]) {
                             sh '''
                                 cd ${modulePath}
-                                git config user.email "azizzouaghi122@gmail.com"
-                                git config user.name "AzizSoftware"
+                                git config user.email "jenkins@azizsoftware.com"
+                                git config user.name "Jenkins CI"
+
 
                                 if git rev-parse --verify updated-version-${newVersion}; then
                                     current_branch=$(git rev-parse --abbrev-ref HEAD)
