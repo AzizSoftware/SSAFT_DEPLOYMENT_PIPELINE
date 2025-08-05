@@ -1,8 +1,8 @@
 pipeline {
-    agent any 
+    agent any
 
     environment {
-        NODEJS_VERSION = 'node-18' 
+        NODEJS_VERSION = 'node-18'
         TEST_PIPELINE = 'SSAFT_TEST_PIPELINE'
         SSH_CREDENTIALS_ID = 'azure_vm_key'
         APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
@@ -40,48 +40,67 @@ pipeline {
                         'SSATF/Services/DataAnalyserService',
                         'SSATF/Client_UI'
                     ]
+                    def filesToCommit = [] // To store paths of modified package.json files
+                    def newVersions = [:] // To store new versions for commit message
 
+                    // Loop through each module to bump its version
                     updatedModules.each { modulePath ->
                         def pkgPath = "${modulePath}/package.json"
                         def json = readJSON file: pkgPath
                         def versionParts = json.version.tokenize('.')
+                        // Increment the patch version
                         versionParts[2] = (versionParts[2] as int) + 1
                         json.version = versionParts.join('.')
                         def newVersion = json.version
-                        writeJSON file: pkgPath, json: json, pretty: 4
+                        writeJSON file: pkgPath, json: json, pretty: 4 // Write back the updated JSON
+
+                        newVersions[modulePath] = newVersion // Store for commit message
+                        filesToCommit << pkgPath // Add to list of files to commit
 
                         echo "🔁 Version bumped to ${newVersion} in ${modulePath}"
+                    }
 
-                        withCredentials([usernamePassword(
-                            credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
-                            usernameVariable: 'GIT_USER',
-                            passwordVariable: 'GIT_TOKEN'
-                        )]) {
-                            sh '''
-                                cd ${modulePath}
-                                git config user.email "jenkins@azizsoftware.com"
-                                git config user.name "Jenkins CI"
+                    // Perform Git operations from the repository root
+                    withCredentials([usernamePassword(
+                        credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh """
+                            # Configure Git user for the commit
+                            git config user.email "jenkins@azizsoftware.com"
+                            git config user.name "Jenkins CI"
 
+                            # Define a consistent branch name for this pipeline run
+                            # Using BUILD_NUMBER for uniqueness, ensures a clean branch for each run
+                            export BRANCH_NAME="version-bump-pipeline-${env.BUILD_NUMBER}"
 
-                                if git rev-parse --verify updated-version-${newVersion}; then
-                                    current_branch=$(git rev-parse --abbrev-ref HEAD)
-                                    if [ "$current_branch" = "updated-version-${newVersion}" ]; then
-                                        git checkout main
-                                    fi
-                                    git branch -D updated-version-${newVersion}
+                            # Clean up the previous local branch if it exists and we're on it
+                            if git rev-parse --verify "\${BRANCH_NAME}" &>/dev/null; then
+                                current_branch=\$(git rev-parse --abbrev-ref HEAD)
+                                if [ "\$current_branch" = "\${BRANCH_NAME}" ]; then
+                                    git checkout main
                                 fi
+                                git branch -D "\${BRANCH_NAME}"
+                            fi
 
-                                if git ls-remote --exit-code --heads origin updated-version-${newVersion}; then
-                                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete updated-version-${newVersion}
-                                fi
+                            # Clean up the previous remote branch if it exists
+                            if git ls-remote --exit-code --heads origin "\${BRANCH_NAME}" &>/dev/null; then
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete "\${BRANCH_NAME}"
+                            fi
 
-                                git checkout -b updated-version-${newVersion}
-                                git add package.json
-                                git commit -m "🔼 Bump version to ${newVersion}" || echo "No changes to commit"
-                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git updated-version-${newVersion}
-                                cd -
-                            '''
-                        }
+                            # Create and switch to the new branch
+                            git checkout -b "\${BRANCH_NAME}"
+
+                            # Add all modified package.json files relative to the workspace root
+                            ${filesToCommit.collect { "git add \"${it}\"" }.join('\n')}
+
+                            # Commit all changes. '|| true' prevents pipeline failure if no changes were made.
+                            git commit -m "🔼 Bump versions for pipeline run \${BUILD_NUMBER}: ${newVersions.collect { k, v -> "${k.split('/').last()}: ${v}" }.join(', ')}" || echo "No changes to commit"
+
+                            # Push the new branch to the remote repository
+                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git "\${BRANCH_NAME}"
+                        """
                     }
                 }
             }
