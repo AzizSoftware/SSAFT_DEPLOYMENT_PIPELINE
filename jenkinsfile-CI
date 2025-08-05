@@ -33,71 +33,46 @@ pipeline {
         }
 
         stage('Bump Version and Push') {
-            steps {
-                script {
-                    def updatedModules = [
-                        'SSATF/Services/TransactionGenerationAPI',
-                        'SSATF/Services/DataAnalyserService',
-                        'SSATF/Client_UI'
-                    ]
-                    def filesToCommit = [] // To store paths of modified package.json files
-                    def newVersions = [:] // To store new versions for commit message
+    steps {
+        script {
+            def pkgPath = 'SSATF/Client_UI/package.json'
+            def json = readJSON file: pkgPath
 
-                    // Loop through each module to bump its version
-                    updatedModules.each { modulePath ->
-                        def pkgPath = "${modulePath}/package.json"
-                        def json = readJSON file: pkgPath
-                        def versionParts = json.version.tokenize('.')
-                        // Increment the patch version
-                        versionParts[2] = (versionParts[2] as int) + 1
-                        json.version = versionParts.join('.')
-                        def newVersion = json.version
-                        writeJSON file: pkgPath, json: json, pretty: 4 // Write back the updated JSON
+            // Extraire version et bumper le patch
+            def versionParts = json.version.tokenize('.')
+            versionParts[2] = (versionParts[2] as int) + 1
+            def newVersion = versionParts.join('.')
 
-                        newVersions[modulePath] = newVersion // Store for commit message
-                        filesToCommit << pkgPath // Add to list of files to commit
+            json.version = newVersion
+            writeJSON file: pkgPath, json: json, pretty: 4
 
-                        echo "🔁 Version bumped to ${newVersion} in ${modulePath}"
-                    }
+            // Construire le nom de branche
+            def branchName = "Upgraded-branch-${newVersion}"
+            env.UPGRADE_BRANCH_NAME = branchName
 
-                    // Perform Git operations from the repository root
-                    withCredentials([usernamePassword(
-                        credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_TOKEN'
-                    )]) {
-                        sh """
-                            # Configure Git user for the commit
-                            git config user.email "jenkins@azizsoftware.com"
-                            git config user.name "Jenkins CI"
+            echo "📌 New branch will be: ${branchName}"
 
-                            # Define a consistent branch name for this pipeline run
-                            # Using BUILD_NUMBER for uniqueness, ensures a clean branch for each run
-                            export BRANCH_NAME="Upgrade-branch"
+            withCredentials([usernamePassword(
+                credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
+                usernameVariable: 'GIT_USER',
+                passwordVariable: 'GIT_TOKEN'
+            )]) {
+                sh """
+                    git config user.email "jenkins@azizsoftware.com"
+                    git config user.name "Jenkins CI"
 
-                            # Attempt to switch to main if currently on the target branch, then delete local branch.
-                            # The '|| true' ensures the step doesn't fail if the branch doesn't exist locally or if checkout fails.
-                            (git checkout main && git branch -D "\${BRANCH_NAME}") || true
+                    git checkout main || true
+                    git pull
 
-                            # Attempt to delete the remote branch, ignoring errors if it doesn't exist.
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete "\${BRANCH_NAME}" || true
-
-                            # Create and switch to the new branch
-                            git checkout -b "\${BRANCH_NAME}"
-
-                            # Add all modified package.json files relative to the workspace root
-                            ${filesToCommit.collect { "git add \"${it}\"" }.join('\n')}
-
-                            # Commit all changes. '|| true' prevents pipeline failure if no changes were made.
-                            git commit -m "🔼 Bump versions for pipeline run \${BUILD_NUMBER}: ${newVersions.collect { k, v -> "${k.split('/').last()}: ${v}" }.join(', ')}" || echo "No changes to commit"
-
-                            # Push the new branch to the remote repository
-                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git "\${BRANCH_NAME}"
-                        """
-                    }
-                }
+                    git checkout -b ${branchName}
+                    git add ${pkgPath}
+                    git commit -m "🔼 Bump version to ${newVersion}"
+                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git ${branchName}
+                """
             }
         }
+    }
+}
 
         stage('Install Dependencies') {
             steps {
