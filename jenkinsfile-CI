@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        NODEJS_VERSION = 'node-18'  // Make sure this NodeJS version is installed via the plugin
-        TEST_PIPELINE = 'SSAFT_TEST_PIPELINE' // Exact Jenkins job name for tests (Trivy, etc.)
-        SSH_CREDENTIALS_ID = 'azure_vm_key' // Jenkins SSH credentials ID
+        NODEJS_VERSION = 'node-18'
+        TEST_PIPELINE = 'SSAFT_TEST_PIPELINE'
+        SSH_CREDENTIALS_ID = 'azure_vm_key'
         APP_REPO_URL = 'https://github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git'
     }
 
@@ -29,6 +29,42 @@ pipeline {
             }
         }
 
+        stage('Bump Version and Push') {
+            steps {
+                script {
+                    def updatedModules = [
+                        'SSATF/Services/TransactionGenerationAPI',
+                        'SSATF/Services/DataAnalyserService',
+                        'SSATF/Client_UI'
+                    ]
+
+                    updatedModules.each { modulePath ->
+                        def pkgPath = "${modulePath}/package.json"
+                        def json = readJSON file: pkgPath
+                        def versionParts = json.version.tokenize('.')
+                        versionParts[2] = (versionParts[2] as int) + 1
+                        json.version = versionParts.join('.')
+                        def newVersion = json.version
+                        writeJSON file: pkgPath, json: json, pretty: 4
+
+                        echo "🔁 Version bumped to ${newVersion} in ${modulePath}"
+
+                        // Commit & Push the bump on new branch
+                        sh """
+                            cd ${modulePath}
+                            git config user.email "jenkins@azizsoftware.com"
+                            git config user.name "Jenkins CI"
+                            git checkout -b updated-version-${newVersion}
+                            git add package.json
+                            git commit -m "🔼 Bump version to ${newVersion}"
+                            git push origin updated-version-${newVersion}
+                            cd -
+                        """
+                    }
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
                 echo "Installing dependencies in subprojects..."
@@ -49,20 +85,16 @@ pipeline {
                 }
             }
         }
-
-        
-
-        
     }
 
     post {
         success {
-            echo "CI pipeline succeeded. Triggering Test Pipeline..."
+            echo "✅ CI pipeline succeeded. Triggering Test Pipeline..."
             build job: "${env.TEST_PIPELINE}", wait: true
         }
 
         failure {
-            echo "CI pipeline failed. Aborting further steps."
+            echo "❌ CI pipeline failed. Aborting further steps."
         }
     }
 }
