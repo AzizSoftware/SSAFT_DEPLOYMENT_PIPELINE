@@ -131,7 +131,7 @@ pipeline {
                     agent any
                     steps {
                         script {
-                            def targetBranch = "version-bump-pipeline-${env.BUILD_NUMBER}"
+                            def targetBranch = "Upgrade-branch"
                             dir("package_and_deploy_temp_${env.BUILD_NUMBER}") {
                                 checkout([
                                     $class: 'GitSCM',
