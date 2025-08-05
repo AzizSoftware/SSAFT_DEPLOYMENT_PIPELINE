@@ -32,55 +32,96 @@ pipeline {
             }
         }
 
-        stage('Bump Version and Push') {
-    steps {
-        script {
-            def pkgPath = 'SSATF/Client_UI/package.json'
-            def json = readJSON file: pkgPath
+        stage('Bump Versions and Push') {
+            steps {
+                script {
+                    def updatedModules = [
+                        'SSATF/Services/TransactionGenerationAPI',
+                        'SSATF/Services/DataAnalyserService',
+                        'SSATF/Client_UI'
+                    ]
 
-            // Extraire version et bumper le patch
-            def versionParts = json.version.tokenize('.')
-            versionParts[2] = (versionParts[2] as int) + 1
-            def newVersion = versionParts.join('.')
+                    def filesToCommit = []
+                    def newVersions = [:]
 
-            json.version = newVersion
-            writeJSON file: pkgPath, json: json, pretty: 4
+                    // Bump version for each module
+                    updatedModules.each { modulePath ->
+                        def pkgPath = "${modulePath}/package.json"
+                        def json = readJSON file: pkgPath
+                        def versionParts = json.version.tokenize('.')
+                        versionParts[2] = (versionParts[2] as int) + 1
+                        json.version = versionParts.join('.')
+                        writeJSON file: pkgPath, json: json, pretty: 4
 
-            // Construire le nom de branche
-            def branchName = "Upgraded-branch-${newVersion}"
-            env.UPGRADE_BRANCH_NAME = branchName
+                        newVersions[modulePath] = json.version
+                        filesToCommit << pkgPath
+                        echo "🔁 Version bumped to ${json.version} in ${modulePath}"
+                    }
 
-            echo "📌 New branch will be: ${branchName}"
+                    // Create dynamic branch name based on one of the bumped versions (Client_UI here)
+                    def newVersionClientUI = newVersions['SSATF/Client_UI']
+                    def branchName = "Upgraded-branch-${newVersionClientUI}"
+                    env.UPGRADE_BRANCH_NAME = branchName
+                    echo "📌 New branch name: ${branchName}"
 
-            withCredentials([usernamePassword(
-                credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
-                usernameVariable: 'GIT_USER',
-                passwordVariable: 'GIT_TOKEN'
-            )]) {
-                sh """
-                    git config user.email "jenkins@azizsoftware.com"
-                    git config user.name "Jenkins CI"
-                
-                    git checkout main || true
-                    git pull
-                
-                    if git rev-parse --verify ${branchName} >/dev/null 2>&1; then
-                        echo "✅ Branche ${branchName} déjà existante, on fait checkout"
-                        git checkout ${branchName}
-                    else
-                        echo "🔧 Création de la branche ${branchName}"
-                        git checkout -b ${branchName}
-                    fi
-                
-                    git add ${pkgPath}
-                    git diff --cached --quiet || git commit -m "🔼 Bump version to ${newVersion}"
-                
-                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git ${branchName}
-                """
+                    withCredentials([usernamePassword(
+                        credentialsId: '4a0363b8-3a92-4661-9c34-18f42434b7e7',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        // Use a shell script with explicit args for secrets, avoiding interpolation warnings
+                        sh script: '''
+                            set -e
+                            git config user.email "jenkins@azizsoftware.com"
+                            git config user.name "Jenkins CI"
+
+                            git checkout main
+                            git pull
+
+                            # Stash local changes before switching branch
+                            if git diff --quiet && git diff --cached --quiet; then
+                                echo "No local changes"
+                            else
+                                echo "Stashing local changes"
+                                git stash
+                            fi
+
+                            if git rev-parse --verify ${BRANCH_NAME} >/dev/null 2>&1; then
+                                echo "✅ Branch ${BRANCH_NAME} exists, checking out"
+                                git checkout ${BRANCH_NAME}
+                            else
+                                echo "🔧 Creating new branch ${BRANCH_NAME}"
+                                git checkout -b ${BRANCH_NAME}
+                            fi
+
+                            # Apply stashed changes back if any
+                            if git stash list | grep -q 'stash@{0}'; then
+                                echo "Applying stashed changes"
+                                git stash pop || true
+                            fi
+
+                            # Add modified package.json files
+                            ''' + filesToCommit.collect { "git add '${it}'" }.join('\n') + '''
+
+                            # Commit if there are changes
+                            if ! git diff --cached --quiet; then
+                                git commit -m "🔼 Bump versions: ''' + newVersions.collect { k,v -> "${k.split('/').last()}: ${v}" }.join(', ') + '''"
+                            else
+                                echo "No changes to commit"
+                            fi
+
+                            # Push branch using credentials passed as env variables to avoid interpolation warnings
+                            git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git ${BRANCH_NAME}
+                        ''', 
+                        env: [
+                            "BRANCH_NAME=${branchName}",
+                            "GIT_USER=${env.GIT_USER}",
+                            "GIT_TOKEN=${env.GIT_TOKEN}"
+                        ]
+                    }
+                }
             }
         }
-    }
-}
 
         stage('Install Dependencies') {
             steps {
