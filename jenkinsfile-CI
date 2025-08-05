@@ -19,7 +19,10 @@ pipeline {
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: 'main']],
-                        userRemoteConfigs: [[url: env.APP_REPO_URL, credentialsId: 'github-pat-azizsoftware']],
+                        userRemoteConfigs: [[
+                            url: env.APP_REPO_URL,
+                            credentialsId: 'github-pat-azizsoftware'
+                        ]],
                         doNotPoll: true
                     ])
                     echo "Listing contents after checkout:"
@@ -54,35 +57,29 @@ pipeline {
                             usernameVariable: 'GIT_USER',
                             passwordVariable: 'GIT_TOKEN'
                         )]) {
-                            sh """
+                            sh '''
                                 cd ${modulePath}
-                                git config user.email "jenkins@azizsoftware.com"
-                                git config user.name "Jenkins CI"
+                                git config user.email "azizzouaghi122@gmail.com"
+                                git config user.name "AzizSoftware"
 
-                                # Si la branche existe localement, et qu'on est dessus, switch sur main avant suppression
                                 if git rev-parse --verify updated-version-${newVersion}; then
-                                    current_branch=\$(git rev-parse --abbrev-ref HEAD)
-                                    if [ "\$current_branch" = "updated-version-${newVersion}" ]; then
+                                    current_branch=$(git rev-parse --abbrev-ref HEAD)
+                                    if [ "$current_branch" = "updated-version-${newVersion}" ]; then
                                         git checkout main
                                     fi
                                     git branch -D updated-version-${newVersion}
                                 fi
 
-                                # Supprimer la branche distante si elle existe
                                 if git ls-remote --exit-code --heads origin updated-version-${newVersion}; then
-                                    git push origin --delete updated-version-${newVersion}
+                                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git --delete updated-version-${newVersion}
                                 fi
 
-                                # Créer et switcher sur la nouvelle branche
                                 git checkout -b updated-version-${newVersion}
-
-                                # Commit et push
                                 git add package.json
                                 git commit -m "🔼 Bump version to ${newVersion}" || echo "No changes to commit"
-                                git remote set-url origin https://${GIT_USER}:\${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git
-                                git push origin updated-version-${newVersion}
+                                git push https://${GIT_USER}:${GIT_TOKEN}@github.com/AzizSoftware/SSAFT_DEPLOYMENT_PIPELINE.git updated-version-${newVersion}
                                 cd -
-                            """
+                            '''
                         }
                     }
                 }
@@ -116,7 +113,6 @@ pipeline {
             echo "✅ CI pipeline succeeded. Triggering Test Pipeline..."
             build job: "${env.TEST_PIPELINE}", wait: true
         }
-
         failure {
             echo "❌ CI pipeline failed. Aborting further steps."
         }
