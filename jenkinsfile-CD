@@ -34,6 +34,7 @@ pipeline {
         }
 
         stage('Parallel Deployments and Artifact Publishing') {
+            // FIX: The 'parallel' block must be wrapped inside a 'steps' block.
             steps {
                 parallel {
                     // This branch handles the existing infrastructure and application deployment
